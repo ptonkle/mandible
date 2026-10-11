@@ -362,34 +362,53 @@ fn place_near_home(w: &mut World, kind: StructureKind) -> u32 {
 }
 
 #[test]
-fn a_blueprint_is_built_only_after_its_cost_is_carried_to_it() {
+fn carpenters_apply_each_load_as_it_arrives() {
+    // TRIAGE row 36: a Carpenter Ant brings its Leaves, then spends time
+    // applying them, which fills the build bar. Work never runs ahead of the
+    // Leaves delivered, but starts before the whole cost has arrived.
     let mut w = world(10);
+    // One Carpenter Ant, so its loads arrive one after another.
+    let mut first = true;
+    w.ants.retain(|a| {
+        if a.colony != 0 || a.species != Species::Carpenter {
+            return true;
+        }
+        let keep = first;
+        first = false;
+        keep
+    });
     let id = place_near_home(&mut w, StructureKind::BroodCell);
     // The cost left the stockpile at once: 200 - 60 Leaves.
     assert_eq!(w.colonies[0].stock[2], 140);
     let s = w.structures.iter().find(|s| s.id == id).unwrap();
     assert_eq!(s.delivered, [0, 0, 0]);
-    let mut seen_delivered_before_work = false;
+    let mut built_before_all_arrived = false;
+    let mut last_work = 0;
     for _ in 0..ticks(600) {
         w.step(&[], &[]);
-        if let Some(s) = w.structures.iter().find(|s| s.id == id) {
-            if s.work_done > 0 {
-                assert!(
-                    s.fully_delivered(),
-                    "no build work before every Leaf arrived"
-                );
-                seen_delivered_before_work = true;
-            }
-            if s.complete {
-                break;
-            }
+        let Some(s) = w.structures.iter().find(|s| s.id == id) else {
+            break;
+        };
+        if s.complete {
+            break;
+        }
+        assert!(
+            s.work_done <= s.covered_work(),
+            "work {} ran ahead of the Leaves delivered ({} covered)",
+            s.work_done,
+            s.covered_work()
+        );
+        assert!(s.work_done >= last_work, "the build bar never goes back");
+        last_work = s.work_done;
+        if s.work_done > 0 && !s.fully_delivered() {
+            built_before_all_arrived = true;
         }
     }
     let s = w.structures.iter().find(|s| s.id == id).unwrap();
-    assert!(
-        seen_delivered_before_work && s.complete,
-        "the brood cell was built"
-    );
+    assert!(s.complete, "the brood cell was built");
+    // 60 Leaves at 50 per trip: the first load is applied while the second
+    // is still on its way.
+    assert!(built_before_all_arrived, "no waiting for the whole cost");
     assert_eq!(w.housing(0), 35, "queen 20 + brood cell 15");
 }
 

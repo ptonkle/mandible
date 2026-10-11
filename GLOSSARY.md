@@ -192,7 +192,7 @@ Rejected names. Do not reuse them without passing the naming test.
 | Term | Origin | Meaning | Never say |
 | --- | --- | --- | --- |
 | Tier | ★ | A colony's stage of advancement: Tier 1, Tier 2, Tier 3. Higher tiers unlock species and upgrades. | age, era, level, tech level, generation |
-| T1, T2, T3 | ◆ | The short form of Tier 1–3, on the corner of action buttons, without a box, so it never looks like a hotkey. | E1, L2, tier boxes |
+| T, T1, T2, T3 | ◆ | The short form of Tier 1–3, on the corner of action buttons, without a box, so it never looks like a hotkey. | E1, L2, tier boxes |
 | Evolve | ★ | To pay resources to reach the next tier. The action is "Evolve to Tier 2". | advance, age up, tech up, level up |
 | Evolution | ★ | An evolve in progress, or its cost: "Evolution: 60s". | upgrade (never for tiers) |
 | Upgrade | ★ | A permanent, colony-wide improvement that applies to every ant of a species, or to every ant (a colony upgrade). Ranked I, II, III. | research, tech, enhancement, buff |

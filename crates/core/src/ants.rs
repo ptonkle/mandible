@@ -210,11 +210,30 @@ impl World {
         if here == 0 {
             return Step::Arrived;
         }
-        let Some(s1) = downhill(f, w, h, cx, cy) else {
+        let Some(mut s1) = downhill(f, w, h, cx, cy) else {
             return Step::Unreachable;
         };
-        let s2 = downhill(f, w, h, s1.0, s1.1).unwrap_or(s1);
         let mode = World::mode_of(a.species);
+        // Never step diagonally past a closed corner: the straight move
+        // would clip it and the ant would freeze. Take the open side step.
+        let (dx, dy) = (s1.0 - cx, s1.1 - cy);
+        if dx != 0 && dy != 0 {
+            let side_x = t.standable(cx + dx, cy, a.colony, mode);
+            let side_y = t.standable(cx, cy + dy, a.colony, mode);
+            if !(side_x && side_y) {
+                let mut sides = Vec::new();
+                if side_x {
+                    sides.push((f.at(w, cx + dx, cy), (cx + dx, cy)));
+                }
+                if side_y {
+                    sides.push((f.at(w, cx, cy + dy), (cx, cy + dy)));
+                }
+                if let Some((_, c)) = sides.into_iter().min() {
+                    s1 = c;
+                }
+            }
+        }
+        let s2 = downhill(f, w, h, s1.0, s1.1).unwrap_or(s1);
         if !t.standable(s1.0, s1.1, a.colony, mode) {
             return Step::Blocked(s1.0, s1.1);
         }
@@ -231,7 +250,11 @@ impl World {
         let sp = self.speed_of(a);
         if !self.step_toward(a, aim, sp) {
             let c = Pos::of_cell(s1.0, s1.1);
-            self.step_toward(a, c, sp);
+            if !self.step_toward(a, c, sp) {
+                // Wedged against a corner: back to the middle of this cell,
+                // from where the next step is clear.
+                self.step_toward(a, Pos::of_cell(cx, cy), sp);
+            }
         }
         Step::Moved
     }
@@ -469,37 +492,45 @@ impl World {
                         s.promised[r] = (s.promised[r] - a.inventory[r]).max(0);
                     }
                     a.inventory = [0; 3];
-                    a.job = if s.still_needed().iter().sum::<i32>() > 0 {
-                        Job::Fetch(b)
-                    } else {
-                        Job::Build(b)
-                    };
+                    // Now apply what was just brought.
+                    a.job = Job::Build(b);
                 }
             }
             Job::Build(b) => {
+                // Apply delivered Leaves as build work, a little each tick,
+                // filling the build bar; when nothing delivered is left to
+                // apply, fetch more instead of waiting.
                 let si = self.structure_index(b).expect("checked");
                 let s = &self.structures[si];
-                // Waiting for others' deliveries means standing by the site.
-                if !s.fully_delivered() && s.still_needed().iter().sum::<i32>() > 0 {
-                    a.job = Job::Fetch(b);
-                    return;
-                }
                 let (x, y, r) = s.site_goal(a.pos);
-                let ready = s.fully_delivered();
                 let key = World::key_for(a, x, y, r);
                 let step = self.follow(a, key);
                 let si = self.structure_index(b).expect("checked");
                 let close = matches!(step, Step::Arrived)
                     || self.structures[si].site_dist(a.pos) <= drop_reach();
-                if close && ready {
-                    let s = &mut self.structures[si];
-                    s.work_done += st.build;
-                    // Health grows with the work, as the structure rises.
-                    s.health = (s.max_health * s.work_done / s.work.max(1)).max(s.health);
-                    if s.work_done >= s.work {
-                        self.complete(si);
+                if !close {
+                    if matches!(step, Step::Unreachable) {
                         a.job = Job::Idle;
                     }
+                    return;
+                }
+                let s = &mut self.structures[si];
+                let covered = s.covered_work();
+                if s.work_done < covered {
+                    s.work_done = (s.work_done + st.build).min(covered);
+                    // Health grows with the work, as the structure rises.
+                    s.health = (s.max_health * s.work_done / s.work.max(1)).max(s.health);
+                }
+                if s.work_done >= s.work && s.fully_delivered() {
+                    self.complete(si);
+                    a.job = Job::Idle;
+                } else if s.work_done >= covered {
+                    a.job = if s.still_needed().iter().sum::<i32>() > 0 {
+                        Job::Fetch(b)
+                    } else {
+                        // Others carry the rest: find other work.
+                        Job::Idle
+                    };
                 }
             }
             _ => {
@@ -507,7 +538,7 @@ impl World {
                 let pick = self
                     .structures
                     .iter()
-                    .filter(|s| s.colony == a.colony && !s.complete)
+                    .filter(|s| s.colony == a.colony && !s.complete && s.has_builder_work())
                     .map(|s| (bp_load.get(&s.id).copied().unwrap_or(0), s.id))
                     .min();
                 if let Some((_, b)) = pick {

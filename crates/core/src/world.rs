@@ -231,6 +231,24 @@ impl Structure {
         (0..3).all(|i| self.delivered[i] >= self.cost[i])
     }
 
+    /// The build work the Leaves delivered so far pay for. Carpenter Ants
+    /// apply delivered Leaves as work; nobody waits for the whole cost
+    /// (TRIAGE row 36). A structure that needs no Leaves is all covered.
+    pub fn covered_work(&self) -> i32 {
+        let leaves = self.cost[Resource::Leaves.index()];
+        if leaves <= 0 {
+            return self.work;
+        }
+        let got = self.delivered[Resource::Leaves.index()].min(leaves);
+        (self.work as i64 * got as i64 / leaves as i64) as i32
+    }
+
+    /// Whether a Carpenter Ant has anything to do here: Leaves to fetch, or
+    /// delivered Leaves still to apply.
+    pub fn has_builder_work(&self) -> bool {
+        self.still_needed().iter().sum::<i32>() > 0 || self.work_done < self.covered_work()
+    }
+
     /// Distance from `p` to the edge of the footprint; for a wall line, to
     /// the edge of its nearest cell (a line is never measured from its
     /// middle).
