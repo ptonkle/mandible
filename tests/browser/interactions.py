@@ -71,3 +71,17 @@ def run(page, check, engine):
     page.click("#end\\.main_menu")
     page.wait_for_selector(".leaf", timeout=5000)
     check(True, "Main Menu returns after the match")
+
+    # Player Settings → Benchmark: the performance scenario runs live and
+    # its panel reports the budget (PLAN decision 25).
+    page.click("#go\\.player_settings")
+    page.wait_for_selector("#go\\.benchmark", timeout=5000)
+    page.click("#go\\.benchmark")
+    page.wait_for_selector("#panel dd", timeout=20000)
+    page.wait_for_timeout(3000)
+    labels = page.locator("#panel dt").all_inner_texts()
+    values = page.locator("#panel dd").all_inner_texts()
+    panel = dict(zip(labels, values))
+    ants = int(panel.get("Ants", "0"))
+    check(ants >= 400, f"the Benchmark runs about 1,200 ants [{ants}]")
+    check(panel.get("Status") in ("Within budget", "Over budget"), f"the Benchmark reports its budget {panel}")
