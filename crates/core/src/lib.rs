@@ -12,6 +12,7 @@
 pub mod ai;
 pub mod ants;
 pub mod api;
+pub mod bench;
 pub mod dice;
 pub mod fixed;
 pub mod fog;
@@ -19,6 +20,7 @@ pub mod lockstep;
 pub mod map;
 pub mod nav;
 pub mod page;
+pub mod render;
 pub mod rules;
 pub mod settings;
 pub mod world;
