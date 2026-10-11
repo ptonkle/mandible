@@ -1243,7 +1243,11 @@ impl App {
                     rows.push(row("stat.damage", st.damage.to_string()));
                     rows.push(row(
                         "stat.attack_speed",
-                        format!("{}{}", tenths(st.attack_ticks), self.t("unit.seconds")),
+                        format!(
+                            "{}{}",
+                            tenths(st.attack_ticks * 10 / TICKS_PER_SECOND),
+                            self.t("unit.seconds")
+                        ),
                     ));
                     rows.push(row(
                         "stat.range",
@@ -1272,7 +1276,7 @@ impl App {
                         "stat.gather_rate",
                         format!(
                             "{}{}",
-                            tenths(1000 / st.gather_ticks.max(1)),
+                            tenths(TICKS_PER_SECOND * 100 / st.gather_ticks.max(1)),
                             self.t("unit.per_second")
                         ),
                     ));
@@ -2552,7 +2556,7 @@ fn button_icon(b: Button) -> String {
         Button::Evolve => "action.evolve".into(),
         Button::Retreat => "action.retreat".into(),
         // No picture of its own yet (render.rs): the fast scout's species.
-        Button::AutoScout => "species.fire".into(),
+        Button::AutoScout => "action.auto_scout".into(),
         Button::Focus(f) => format!("focus.{}", f.key()),
     }
 }

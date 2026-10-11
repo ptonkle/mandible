@@ -325,21 +325,21 @@ fn pause_and_time_scale_run_a_local_sandbox_match_slower_or_faster() {
             a.advance(now);
         }
     };
-    // Normal Game Speed is 10 ticks per second, so 1 s at ×1 is 10 ticks.
+    // Normal Game Speed is 20 ticks per second, so 1 s at ×1 is 20 ticks.
     run(&mut a, 1000);
-    assert_eq!(tick(&a), 10);
-    a.act("time.scale", "", false, false); // ×2: 20 ticks
+    assert_eq!(tick(&a), 20);
+    a.act("time.scale", "", false, false); // ×2: 40 ticks
     run(&mut a, 1000);
-    assert_eq!(tick(&a), 30);
-    a.act("time.scale", "", false, false); // ×4: 40 ticks
+    assert_eq!(tick(&a), 60);
+    a.act("time.scale", "", false, false); // ×4: 80 ticks
     run(&mut a, 1000);
-    assert_eq!(tick(&a), 70);
-    a.act("time.scale", "", false, false); // ×½: 5 ticks
+    assert_eq!(tick(&a), 140);
+    a.act("time.scale", "", false, false); // ×½: 10 ticks
     run(&mut a, 1000);
-    assert_eq!(tick(&a), 75);
+    assert_eq!(tick(&a), 150);
     a.act("time.pause", "", false, false);
     run(&mut a, 1000);
-    assert_eq!(tick(&a), 75, "Pause stops time");
+    assert_eq!(tick(&a), 150, "Pause stops time");
     // Without Sandbox (and not spectating) there is no Pause.
     let mut b = app();
     start_match(&mut b);
@@ -361,7 +361,7 @@ fn hill_announcements_give_the_reward_and_the_winner_by_colour() {
             x: 0,
             y: 0,
             r: 4,
-            ends: w.tick + 320,
+            ends: w.tick + 32 * tool_core::rules::TICKS_PER_SECOND,
             hold: vec![2, 5],
         });
     }
@@ -490,4 +490,30 @@ fn map_revealed_and_sandbox_are_match_settings() {
     start_match(&mut a);
     let s = &a.game.as_ref().unwrap().world.settings;
     assert!(s.map_revealed && s.sandbox);
+}
+
+#[test]
+fn tooltips_show_real_seconds_whatever_the_tick_rate() {
+    let mut a = app();
+    start_match(&mut a);
+    a.act("tab.0", "", false, false);
+    let ui = a.ui();
+    let soldier = &ui["match"]["grid"][1];
+    let rows = soldier["rows"].as_array().unwrap();
+    let get = |label: &str| {
+        rows.iter()
+            .find(|r| r[0] == label)
+            .map(|r| r[1].as_str().unwrap().to_string())
+            .unwrap_or_default()
+    };
+    // A Soldier Ant attacks once a second (rules.rs: ticks(10)).
+    assert_eq!(get("Attack Speed"), "1.0s");
+    // A Harvester Ant gathers one resource every 0.3 s: 3.3 per second.
+    let harvester = &ui["match"]["grid"][0];
+    let hr: Vec<_> = harvester["rows"].as_array().unwrap().clone();
+    let rate = hr.iter().find(|r| r[0] == "Gather Rate").unwrap()[1]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(rate, "3.3/s");
 }

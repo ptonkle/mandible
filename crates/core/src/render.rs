@@ -2534,6 +2534,25 @@ pub fn icon_list(key: &str, colony: u8, size: i32) -> Option<Vec<i32>> {
             list.outline(C_INK, full / 24, &a);
             return Some(list.out);
         }
+        "action.auto_scout" => {
+            // A Fire Ant under a magnifying glass: the colony's own scout.
+            item(
+                &mut list,
+                ant_shape_id(Species::Fire, UP, true),
+                (full * 2 / 5, full * 2 / 5),
+                full / 2,
+                colour,
+                None,
+            );
+            let ring = circle(full * 2 / 5, full * 2 / 5, full * 3 / 10, 24);
+            list.outline(C_INK, full / 14, &ring);
+            list.line(
+                C_INK,
+                full / 9,
+                &[(full * 3 / 5, full * 3 / 5), (full * 9 / 10, full * 9 / 10)],
+            );
+            return Some(list.out);
+        }
         "action.retreat" => {
             // An arrow running home to the queen.
             item(
@@ -2616,6 +2635,7 @@ mod icon_tests {
         for k in [
             "action.all_ants",
             "action.evolve",
+            "action.auto_scout",
             "action.retreat",
             "focus.balanced",
             "focus.food",
