@@ -782,7 +782,12 @@ pub fn decide(w: &World, colony: u8, d: Difficulty) -> Vec<Command> {
         }
     }
 
-    // 7. Army control.
+    // 7. Army control. With no queen and no hatchery left, the last ants
+    // all fight: a lone scout wandering the map would only drag the match
+    // out.
+    if queens.is_empty() && hatcheries == 0 && c.auto_scout {
+        out.push(Command::AutoScout { on: false });
+    }
     let seen = enemy_seen(w, colony);
     let has_waypoint = c.waypoints.iter().any(|v| !v.is_empty());
     let clear_all = |out: &mut Vec<Command>| {

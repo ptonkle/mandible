@@ -27,17 +27,30 @@ const DIG_DIRT: u32 = 60;
 const DIG_WALL: u32 = 120;
 
 /// The terrain a field is built over. `wall` holds the owning colony of a
-/// complete wall on each cell, or `NO_WALL`.
+/// complete wall on each cell, or `NO_WALL`. `teams` gives each colony's
+/// team: a wall lets its whole team through (a gate), so allies never dig
+/// or break each other's walls. Empty `teams` means every colony is its own
+/// team.
 pub struct Terrain<'a> {
     pub w: i32,
     pub h: i32,
     pub ground: &'a [Ground],
     pub wall: &'a [u8],
+    pub teams: &'a [u8],
 }
 
 pub const NO_WALL: u8 = u8::MAX;
 
 impl Terrain<'_> {
+    /// Whether a wall owned by `owner` lets `colony`'s ants through.
+    pub fn friendly(&self, owner: u8, colony: u8) -> bool {
+        owner == colony
+            || matches!(
+                (self.teams.get(owner as usize), self.teams.get(colony as usize)),
+                (Some(a), Some(b)) if a == b
+            )
+    }
+
     /// Cost to step onto a cell, or `None` if the cell is closed.
     fn enter(&self, i: usize, colony: u8, mode: Mode) -> Option<u32> {
         let g = self.ground[i];
@@ -46,7 +59,7 @@ impl Terrain<'_> {
             Ground::Rock => None,
             Ground::Dirt => (mode == Mode::Dig).then_some(DIG_DIRT),
             Ground::Floor => {
-                if wall == NO_WALL || wall == colony || mode == Mode::Fly {
+                if wall == NO_WALL || self.friendly(wall, colony) || mode == Mode::Fly {
                     Some(0)
                 } else if mode == Mode::Dig {
                     Some(DIG_WALL)
@@ -66,7 +79,7 @@ impl Terrain<'_> {
         match self.ground[i] {
             Ground::Floor => {
                 let wall = self.wall[i];
-                wall == NO_WALL || wall == colony || mode == Mode::Fly
+                wall == NO_WALL || self.friendly(wall, colony) || mode == Mode::Fly
             }
             _ => false,
         }
@@ -159,6 +172,12 @@ fn build(t: &Terrain, key: FieldKey) -> Vec<u16> {
     let n = (t.w * t.h) as usize;
     let mut dist = vec![u32::MAX; n];
     let mut heap = BinaryHeap::new();
+    // Goal cells: open cells within the radius. Ants pass through friendly
+    // walls but never stop on one (TRIAGE row 38: retreating ants used to
+    // stop on the walls round a nest, looking stuck), so wall cells are
+    // goals only when the whole goal area is walled.
+    let mut goals: Vec<usize> = Vec::new();
+    let mut walled: Vec<usize> = Vec::new();
     for y in key.y - key.r..=key.y + key.r {
         for x in key.x - key.r..=key.x + key.r {
             let dx = x - key.x;
@@ -173,10 +192,20 @@ fn build(t: &Terrain, key: FieldKey) -> Vec<u16> {
                 })
             {
                 let i = (y * t.w + x) as usize;
-                dist[i] = 0;
-                heap.push(Reverse((0u32, i as u32)));
+                if t.wall[i] == NO_WALL {
+                    goals.push(i);
+                } else {
+                    walled.push(i);
+                }
             }
         }
+    }
+    if goals.is_empty() {
+        goals = walled;
+    }
+    for i in goals {
+        dist[i] = 0;
+        heap.push(Reverse((0u32, i as u32)));
     }
     const STEPS: [(i32, i32, u32); 8] = [
         (1, 0, STRAIGHT),
@@ -301,6 +330,7 @@ mod tests {
             h,
             ground: &g,
             wall: &wl,
+            teams: &[],
         };
         let mut nav = Nav::default();
         let f = nav.field(
@@ -328,6 +358,7 @@ mod tests {
             h,
             ground: &g,
             wall: &wl,
+            teams: &[],
         };
         let mut nav = Nav::default();
         let key = |colony| FieldKey {
@@ -362,6 +393,7 @@ mod tests {
             h,
             ground: &g,
             wall: &wl,
+            teams: &[],
         };
         let mut nav = Nav::default();
         let f = nav.field(
@@ -394,6 +426,7 @@ mod tests {
                 h,
                 ground: &g,
                 wall: &wl,
+                teams: &[],
             };
             assert_eq!(nav.field(&t, key).at(w, 0, 0), UNREACHED);
         }
@@ -404,6 +437,7 @@ mod tests {
             h,
             ground: &g,
             wall: &wl,
+            teams: &[],
         };
         assert_eq!(nav.field(&t, key).at(w, 0, 0), 40);
     }
@@ -416,6 +450,7 @@ mod tests {
             h,
             ground: &g,
             wall: &wl,
+            teams: &[],
         };
         let mut nav = Nav::default();
         let f = nav.field(

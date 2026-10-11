@@ -35,7 +35,10 @@ pub enum Focus {
 impl Focus {
     pub fn weights(self) -> [i32; 3] {
         match self {
-            Focus::Balanced => [2, 1, 1],
+            // Food 3 : Nectar 1 : Leaves 2. Food pays for nearly everything
+            // and Leaves build; Nectar is wanted only from Tier 2 (TRIAGE
+            // row 52).
+            Focus::Balanced => [3, 1, 2],
             Focus::Food => [3, 1, 1],
             Focus::Nectar => [1, 3, 1],
             Focus::Leaves => [1, 1, 3],
@@ -319,6 +322,14 @@ pub fn queen_clearance(queen_radius: i32, site_reach: i32) -> i32 {
     pickup_reach(queen_radius) + site_reach + CELL / 2
 }
 
+/// The least distance between two queens' centres (any colonies, built or
+/// blueprint): 9 cells, so footprints keep 4 cells apart. It is above the
+/// pickup clearance between two queens of one colony (about 8 cells).
+pub const QUEEN_SPACING: i32 = 9 * CELL;
+
+/// The least distance from a node to the edge of a structure's footprint.
+pub const NODE_CLEARANCE: i32 = 3 * CELL / 2;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Node {
     pub id: Id,
@@ -508,11 +519,13 @@ impl Refusal {
     }
 }
 
+/// Starting Resources. Little Nectar: it is a mid-game resource (TRIAGE
+/// row 52).
 fn starting_stock(level: crate::settings::Level) -> Cost {
     match level {
-        crate::settings::Level::Low => [150, 50, 100],
-        crate::settings::Level::Normal => [300, 100, 200],
-        crate::settings::Level::High => [600, 250, 400],
+        crate::settings::Level::Low => [150, 25, 100],
+        crate::settings::Level::Normal => [300, 50, 200],
+        crate::settings::Level::High => [600, 150, 400],
     }
 }
 
@@ -588,7 +601,8 @@ impl World {
                 ranks: Ranks::default(),
                 focus: Focus::Balanced,
                 retreat: false,
-                auto_scout: false,
+                // On from the start for every colony (TRIAGE row 45).
+                auto_scout: true,
                 scout: None,
                 scout_goal: None,
                 waypoints: vec![Vec::new(); Species::ALL.len()],
@@ -1344,55 +1358,74 @@ impl World {
             };
         }
         let r = kind.stats().radius / CELL;
+        // The footprint stands on open, explored floor (explored by the
+        // team: allies share vision), with no wall on it.
         for (dx, dy) in map::disk_offsets(r) {
             let (cx, cy) = (x + dx, y + dy);
             if !self.map.is_floor(cx, cy)
                 || self.wall[self.map.idx(cx, cy)] != NO_WALL
-                || !self.explored[ci].get(self.map.idx(cx, cy))
+                || !self.team_has_explored(colony, cx, cy)
             {
                 return Err(Refusal::BadPlace);
             }
         }
         let centre = Pos::of_cell(x, y);
         let my_r = kind.stats().radius;
-        // Clear of other structures and of nodes.
+        // Clear of other structures. The pickup clearance (a queen's pickup
+        // reach and a blueprint's delivery reach never meet) only matters
+        // between one colony's own queens and blueprints: other colonies'
+        // Carpenter Ants never fetch from them.
         for s in &self.structures {
+            let own = s.colony == colony;
             let blocks = if s.kind == StructureKind::Wall {
                 let reach = my_r / CELL + 1;
                 s.cells
                     .iter()
                     .any(|b| (x - b.0).abs() <= reach && (y - b.1).abs() <= reach)
+                    || (own
+                        && kind == StructureKind::Queen
+                        && !s.complete
+                        && s.cells.iter().any(|&(bx, by)| {
+                            Pos::of_cell(bx, by).dist(centre)
+                                < queen_clearance(my_r, CELL / 2 + drop_reach())
+                        }))
             } else {
                 s.pos.dist(centre) < s.radius() + my_r + CELL / 2
-                    // A queen's pickup reach and a blueprint's delivery
-                    // reach never meet.
-                    || (s.kind == StructureKind::Queen
+                    || (own
+                        && s.kind == StructureKind::Queen
                         && s.pos.dist(centre) < queen_clearance(s.radius(), my_r + drop_reach()))
-                    || (kind == StructureKind::Queen
+                    || (own
+                        && kind == StructureKind::Queen
                         && s.pos.dist(centre) < queen_clearance(my_r, s.radius() + drop_reach()))
             };
             if blocks {
                 return Err(Refusal::BadPlace);
             }
         }
+        // Clear of nodes: no node under the footprint or right at its edge,
+        // so gatherers can still reach it.
         for n in &self.nodes {
-            if n.amount > 0
-                && map::disk_offsets(r)
-                    .into_iter()
-                    .any(|(dx, dy)| n.pos.dist(Pos::of_cell(x + dx, y + dy)) < CELL * 2)
-            {
+            if n.amount > 0 && n.pos.dist(centre) < my_r + NODE_CLEARANCE {
                 return Err(Refusal::BadPlace);
             }
         }
         match kind {
             StructureKind::Queen => {
-                if self.map.chamber_at(x, y).is_none() {
+                // Room to walk round it: a ring of open ground (floor or
+                // dirt, never rock) one cell beyond the footprint. Any
+                // chamber, clearing or open ground qualifies (TRIAGE row 46:
+                // the old test, "inside a chamber's planned circle", refused
+                // much of what is drawn as chamber).
+                let room = map::disk_offsets(r + 1)
+                    .into_iter()
+                    .all(|(dx, dy)| self.map.at(x + dx, y + dy) != Ground::Rock);
+                if !room {
                     return Err(Refusal::BadPlace);
                 }
                 let too_close = self
                     .structures
                     .iter()
-                    .any(|s| s.kind == StructureKind::Queen && s.pos.dist(centre) < 14 * CELL);
+                    .any(|s| s.kind == StructureKind::Queen && s.pos.dist(centre) < QUEEN_SPACING);
                 if too_close {
                     return Err(Refusal::BadPlace);
                 }
@@ -1409,6 +1442,19 @@ impl World {
             }
         }
         Ok(())
+    }
+
+    /// Whether a colony or an ally has explored a cell.
+    pub fn team_has_explored(&self, colony: u8, x: i32, y: i32) -> bool {
+        if !self.map.inside(x, y) {
+            return false;
+        }
+        let i = self.map.idx(x, y);
+        let team = self.colonies[colony as usize].team;
+        self.colonies
+            .iter()
+            .enumerate()
+            .any(|(k, c)| c.team == team && self.explored[k].get(i))
     }
 
     fn place(

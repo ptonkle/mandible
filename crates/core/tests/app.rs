@@ -481,13 +481,14 @@ fn all_ants_shows_all_and_auto_scout_toggles_on_the_colony_tab() {
     assert_eq!(all["icon"], "");
     let scout = button(&mut a, 4, 9);
     assert_eq!(scout["label"], "Auto-Scout");
-    assert_eq!(scout["active"], false);
+    // Auto-Scout is on from the start (TRIAGE row 45); a click turns it off.
+    assert_eq!(scout["active"], true);
     a.act("grid.9", "", false, false);
     a.advance(150);
-    assert!(a.game.as_ref().unwrap().world.colonies[0].auto_scout);
+    assert!(!a.game.as_ref().unwrap().world.colonies[0].auto_scout);
     let scout = button(&mut a, 4, 9);
-    assert_eq!(scout["active"], true);
-    assert!(rows_of(&scout).contains(&("Status".into(), "On".into())));
+    assert_eq!(scout["active"], false);
+    assert!(rows_of(&scout).contains(&("Status".into(), "Off".into())));
 }
 
 #[test]
