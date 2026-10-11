@@ -1741,7 +1741,8 @@ impl App {
             x2,
             y2,
             valid: g.world.check_place(g.me, kind, x, y, x2, y2).is_ok()
-                && g.world.can_pay(g.me, &place_cost(kind, x, y, x2, y2)),
+                && g.world
+                    .can_pay(g.me, &place_cost(&g.world, g.me, kind, x, y, x2, y2)),
         });
         let mouse = g.view.world_at(g.mouse.0, g.mouse.1);
         let hover_waypoint = g.world.colonies[g.me as usize]
@@ -2085,11 +2086,19 @@ impl App {
     }
 }
 
-/// What a blueprint will cost: walls cost per cell.
-fn place_cost(kind: StructureKind, x: i32, y: i32, x2: i32, y2: i32) -> [i32; 3] {
+/// What a blueprint will cost: walls cost per cell actually built.
+fn place_cost(
+    w: &World,
+    colony: u8,
+    kind: StructureKind,
+    x: i32,
+    y: i32,
+    x2: i32,
+    y2: i32,
+) -> [i32; 3] {
     let base = kind.stats().cost;
     if kind == StructureKind::Wall {
-        let n = World::wall_cells(x, y, x2, y2).len() as i32;
+        let n = w.wall_plan(colony, x, y, x2, y2).len() as i32;
         [base[0] * n, base[1] * n, base[2] * n]
     } else {
         base

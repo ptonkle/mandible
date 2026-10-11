@@ -316,19 +316,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn ticks_fall_due_every_hundred_milliseconds() {
+    fn ticks_fall_due_every_fifty_milliseconds() {
         let mut b = Bench::new(800, 600, "");
         b.frame_start(0);
         assert!(!b.tick_due());
         b.frame_start(16_000);
         assert!(!b.tick_due());
-        b.frame_start(250_000);
+        // Normal Game Speed is 20 ticks per second: 120 ms owes two ticks.
+        b.frame_start(120_000);
         let mut n = 0;
         while b.tick_due() {
             b.tick();
             n += 1;
         }
-        assert_eq!(n, 2, "250 ms owes two ticks of 100 ms");
+        assert_eq!(n, 2, "120 ms owes two ticks of 50 ms");
     }
 
     #[test]

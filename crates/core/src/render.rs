@@ -2107,9 +2107,16 @@ pub fn frame(
         let unit = body_unit(body_of(pl.kind));
         if pl.kind == StructureKind::Wall {
             let r = cam.length(CELL / 2);
+            // Cells the wall will skip (rock, dirt, too close) show as invalid.
+            let plan = world.wall_plan(pl.colony, pl.x, pl.y, pl.x2, pl.y2);
             for (cx, cy) in World::wall_cells(pl.x, pl.y, pl.x2, pl.y2) {
                 let (x, y) = cam.screen(Pos::of_cell(cx, cy));
                 let sq = scaled(&unit, x, y, r);
+                let colour = if plan.contains(&(cx, cy)) {
+                    colour
+                } else {
+                    C_INVALID
+                };
                 list.poly(colour, &sq);
                 list.outline(player(pl.colony), ink, &sq);
             }
