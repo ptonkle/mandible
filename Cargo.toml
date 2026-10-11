@@ -5,3 +5,7 @@ members = ["crates/core", "crates/shim"]
 [profile.release]
 opt-level = "s"
 lto = true
+
+# The simulation must be fast in tests too (1,200 ants, AI matches).
+[profile.dev.package.tool_core]
+opt-level = 3
