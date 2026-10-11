@@ -77,6 +77,7 @@ fn draw_list_names_only_known_ops() {
             species: None,
             x: c.cx,
             y: c.cy,
+            add: false,
         },
     );
     for _ in 0..30 {

@@ -279,6 +279,7 @@ fn duel() {
                 species: None,
                 x: ch.cx + dx,
                 y: ch.cy,
+                add: false,
             },
         )
     };

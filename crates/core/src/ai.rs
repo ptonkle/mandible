@@ -415,6 +415,7 @@ fn sweep(w: &World, colony: u8, from: Pos) -> Vec<Command> {
                 species: None,
                 x,
                 y,
+                add: false,
             });
         } else {
             for s in Species::ALL.into_iter().filter(|s| s.is_combat()) {
@@ -422,6 +423,7 @@ fn sweep(w: &World, colony: u8, from: Pos) -> Vec<Command> {
                     species: Some(s),
                     x,
                     y,
+                    add: true,
                 });
             }
         }
@@ -751,6 +753,7 @@ pub fn decide(w: &World, colony: u8, d: Difficulty) -> Vec<Command> {
                     species: None,
                     x,
                     y,
+                    add: false,
                 });
             }
         } else {
@@ -769,6 +772,7 @@ pub fn decide(w: &World, colony: u8, d: Difficulty) -> Vec<Command> {
                     species: None,
                     x,
                     y,
+                    add: false,
                 });
             }
         } else if has_waypoint {
@@ -807,6 +811,7 @@ pub fn decide(w: &World, colony: u8, d: Difficulty) -> Vec<Command> {
                     species: None,
                     x,
                     y,
+                    add: false,
                 });
             }
             None => out.extend(sweep(w, colony, home)),
@@ -847,6 +852,7 @@ pub fn decide(w: &World, colony: u8, d: Difficulty) -> Vec<Command> {
                 species: Some(Species::Soldier),
                 x: ch.cx,
                 y: ch.cy,
+                add: false,
             });
         }
     } else if let Some(h) = &w.events.hill {
@@ -855,6 +861,7 @@ pub fn decide(w: &World, colony: u8, d: Difficulty) -> Vec<Command> {
                 species: None,
                 x: h.x,
                 y: h.y,
+                add: false,
             });
         }
     }

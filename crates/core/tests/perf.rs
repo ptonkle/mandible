@@ -47,6 +47,7 @@ fn twelve_hundred_ants_tick_within_budget() {
                 species: None,
                 x: c.cx,
                 y: c.cy,
+                add: false,
             },
         ));
     }

@@ -64,6 +64,7 @@ pub fn bench_world(seed: u64, biome: Biome) -> World {
                     species: None,
                     x: c.cx,
                     y: c.cy,
+                    add: false,
                 },
             )
         })

@@ -91,6 +91,9 @@ pub enum Command {
         species: Option<Species>,
         x: i32,
         y: i32,
+        /// Shift: add beside the species' waypoints instead of replacing them.
+        #[serde(default)]
+        add: bool,
     },
     /// Clears the waypoint nearest (x, y), within 3 cells.
     ClearWaypoint {
@@ -780,7 +783,7 @@ impl World {
                 }
                 Ok(())
             }
-            Command::SetWaypoint { species, x, y } => {
+            Command::SetWaypoint { species, x, y, add } => {
                 // Anywhere on the map, even unexplored: the waypoint snaps
                 // to the nearest open ground within 6 cells.
                 let (x, y) = self.nearest_open(*x, *y, 6).ok_or(Refusal::BadPlace)?;
@@ -794,8 +797,8 @@ impl World {
                         return Err(Refusal::BadPlace);
                     }
                     let wps = &mut self.colonies[ci].waypoints[s.index()];
-                    if species.is_none() {
-                        // All Ants replaces every combat species' waypoints.
+                    if !*add {
+                        // A plain click replaces; Shift + click adds.
                         wps.clear();
                     }
                     if wps.len() >= WAYPOINTS_PER_SPECIES {

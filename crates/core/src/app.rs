@@ -1535,6 +1535,7 @@ impl App {
                         species,
                         x: cx,
                         y: cy,
+                        add: false,
                     });
                     if !shift {
                         g.mode = Mode::Idle;

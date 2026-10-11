@@ -507,6 +507,7 @@ fn waypoints_split_a_species_evenly() {
                 species: Some(Species::Soldier),
                 x: hx - 8,
                 y: hy + dy,
+                add: true, // Shift + click: three waypoints, not one
             },
         );
     }
@@ -531,6 +532,7 @@ fn clearing_a_waypoint_removes_it() {
             species: None,
             x: hx - 8,
             y: hy,
+            add: false,
         },
     );
     assert!(!w.colonies[0].waypoints[Species::Fire.index()].is_empty());
@@ -553,6 +555,7 @@ fn retreat_pulls_ants_home_and_releasing_sends_them_back() {
             species: Some(Species::Fire),
             x: cx,
             y: cy,
+            add: false,
         },
     );
     let centre = Pos::of_cell(cx, cy);
@@ -707,6 +710,7 @@ fn all_ants_never_moves_gatherers_or_builders() {
             species: None,
             x: hx - 8,
             y: hy,
+            add: false,
         },
     );
     for s in Species::ALL {
@@ -714,4 +718,26 @@ fn all_ants_never_moves_gatherers_or_builders() {
         assert_eq!(has, s.is_combat(), "{s:?}");
     }
     assert!(w.colonies[0].waypoints[Species::Harvester.index()].is_empty());
+}
+
+#[test]
+fn a_plain_waypoint_replaces_and_shift_adds() {
+    let mut w = arena(26);
+    let (hx, hy) = home(&w, 0).cell();
+    let set = |w: &mut World, dy: i32, add: bool| {
+        w.apply(
+            0,
+            &Command::SetWaypoint {
+                species: Some(Species::Soldier),
+                x: hx - 8,
+                y: hy + dy,
+                add,
+            },
+        )
+    };
+    set(&mut w, -6, false);
+    set(&mut w, 0, false);
+    assert_eq!(w.colonies[0].waypoints[Species::Soldier.index()].len(), 1);
+    set(&mut w, 6, true);
+    assert_eq!(w.colonies[0].waypoints[Species::Soldier.index()].len(), 2);
 }
