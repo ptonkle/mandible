@@ -673,7 +673,7 @@ impl App {
                 }
                 seats.push(json!({"type": "input", "id": "pva.seed", "label": self.t("setting.seed"), "value": self.seed_text, "placeholder": self.t("random")}));
                 vec![
-                    json!({"kind": "form", "heading": self.t("menu.play_vs_ai"), "items": seats}),
+                    json!({"kind": "form", "single": true, "heading": self.t("menu.play_vs_ai"), "items": seats}),
                     json!({"kind": "form", "heading": self.t("menu.match_settings"), "items": self.settings_fields(&self.setup, "pva", true)}),
                     json!({"kind": "row", "items": [self.button("go.main_menu", "menu.back"), self.button("pva.start", "menu.start")]}),
                 ]
@@ -809,8 +809,9 @@ impl App {
         if host {
             row.push(self.button("lobby.start", "menu.start"));
         }
-        let mut panels =
-            vec![json!({"kind": "form", "heading": self.t("online.lobby"), "items": seats})];
+        let mut panels = vec![
+            json!({"kind": "form", "single": true, "heading": self.t("online.lobby"), "items": seats}),
+        ];
         if host && self.online.codes {
             // Pasted codes (`?codes` only): one Invite Code per joiner,
             // answered by a Reply Code.

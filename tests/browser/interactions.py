@@ -21,7 +21,38 @@ def text(page, selector):
     return page.inner_text(selector).strip()
 
 
+# Layout rule (TRIAGE row 31): every menu screen fits this window with no
+# scroll bar. 1280 x 720 is a common small laptop screen.
+FIT_W, FIT_H = 1280, 720
+MENU_SCREENS = ["go.play_vs_ai", "go.online", "go.match_settings", "go.player_settings"]
+
+
+def fits(page):
+    """Overflow of the menu area in pixels: (sideways, downwards)."""
+    w, h, cw, ch = page.evaluate(
+        "() => { const m = document.getElementById('menus');"
+        " return [m.scrollWidth, m.scrollHeight, m.clientWidth, m.clientHeight]; }"
+    )
+    return w - cw, h - ch
+
+
+def check_menus_fit(page, check):
+    page.set_viewport_size({"width": FIT_W, "height": FIT_H})
+    page.wait_for_timeout(100)
+    over = fits(page)
+    check(over == (0, 0), f"the main menu fits {FIT_W}x{FIT_H} with no scroll bar {over}")
+    for screen in MENU_SCREENS:
+        page.click("#" + screen.replace(".", "\\."))
+        page.wait_for_selector("#go\\.main_menu", timeout=5000)
+        page.wait_for_timeout(150)
+        over = fits(page)
+        check(over == (0, 0), f"{screen} fits {FIT_W}x{FIT_H} with no scroll bar {over}")
+        page.click("#go\\.main_menu")
+        page.wait_for_selector(".leaf", timeout=5000)
+
+
 def run(page, check, engine):
+    check_menus_fit(page, check)
     leaves = [t.strip() for t in page.locator(".leaf .leaf-text").all_inner_texts()]
     check(
         leaves == [STRINGS["menu.play_vs_ai"], STRINGS["menu.online"], STRINGS["menu.match_settings"], STRINGS["menu.player_settings"]],

@@ -30,7 +30,7 @@ body {
   overflow: auto;
   /* The chosen leaf slides out past the right edge: no scroll bar for it. */
   overflow-x: hidden;
-  padding: 2rem 1rem 4rem;
+  padding: 1rem 1rem 1rem;
   background:
     radial-gradient(ellipse at 20% 10%, #4a3a2a 0, transparent 60%),
     radial-gradient(ellipse at 80% 90%, #3f2f20 0, transparent 55%),
@@ -38,18 +38,34 @@ body {
 }
 .menus h1 {
   text-align: center;
-  font-size: 2.6rem;
+  font-size: 2.2rem;
   letter-spacing: 0.06em;
-  margin: 0.5rem 0 1.5rem;
+  margin: 0 0 0.8rem;
   color: var(--accent);
   text-shadow: 0 3px 0 #000;
 }
-#panels { max-width: 46rem; margin: 0 auto; display: grid; gap: 1.2rem; }
-.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.2rem; }
-.panel h2 { margin: 0 0 0.8rem; font-size: 1.15rem; color: var(--accent); }
+/* Layout rule (TRIAGE row 31): every menu screen fits a 1280 x 720 window
+   with no scroll bar; tests/browser/interactions.py checks each screen.
+   Panels sit side by side when there is room, and fields flow into columns,
+   so long forms grow sideways rather than down. */
+#panels {
+  max-width: 78rem; margin: 0 auto; display: grid; gap: 0.8rem; align-items: start;
+  grid-template-columns: repeat(auto-fit, minmax(30rem, 1fr));
+}
+.panel.row, .panel.leaves { grid-column: 1 / -1; }
+.panel.form {
+  display: grid; gap: 0.15rem 1.2rem; align-content: start;
+  grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr));
+}
+.panel.form > h2, .panel.form > .toggles-field, .panel.form > table { grid-column: 1 / -1; }
+.panel.form.single { grid-template-columns: 1fr; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 0.7rem 1rem; }
+.panel h2 { margin: 0 0 0.4rem; font-size: 1.1rem; color: var(--accent); }
 .panel.row { display: flex; flex-wrap: wrap; gap: 0.6rem; justify-content: flex-end; background: none; border: none; padding: 0; }
-.field { display: grid; grid-template-columns: 12rem 1fr; align-items: center; gap: 0.6rem; margin: 0.35rem 0; }
+.field { display: grid; grid-template-columns: 9.5rem 1fr; align-items: center; gap: 0.5rem; margin: 0.12rem 0; }
 .field label { color: var(--muted); }
+.field { min-width: 0; }
+.field > select, .field > input, .field > textarea { width: 100%; min-width: 0; }
 select, input, textarea {
   font: inherit; color: var(--ink); background: var(--soil-2);
   border: 1px solid var(--line); border-radius: 6px; padding: 0.35rem 0.5rem;
@@ -60,18 +76,18 @@ textarea { width: 100%; min-height: 3.2rem; resize: vertical; font-family: ui-mo
   border-radius: 999px; padding: 0.45rem 1.1rem; cursor: pointer;
 }
 .button:hover, .keybind button:hover { background: var(--leaf); }
-.toggles { display: flex; flex-wrap: wrap; gap: 0.4rem 1rem; }
+.toggles { display: grid; grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr)); gap: 0.15rem 0.8rem; }
 .toggles label { display: flex; gap: 0.3rem; align-items: center; }
 table.pairs { border-collapse: collapse; width: 100%; }
 table.pairs td { padding: 0.15rem 0.5rem 0.15rem 0; vertical-align: top; }
 table.pairs td:first-child { color: var(--muted); white-space: nowrap; width: 12rem; }
-.keybind { display: grid; grid-template-columns: 12rem auto; align-items: center; gap: 0.6rem; margin: 0.2rem 0; }
-.keybind button { border-radius: 6px; min-width: 6rem; background: var(--soil-3); border-color: var(--line); }
+.keybind { display: grid; grid-template-columns: 9.5rem auto; align-items: center; gap: 0.5rem; margin: 0.08rem 0; }
+.keybind button { border-radius: 6px; min-width: 6rem; padding: 0.15rem 0.6rem; background: var(--soil-3); border-color: var(--line); }
 
 /* Main menu: each button is a leaf; choosing one sends an ant to drag it. */
-.leaves { display: grid; gap: 1.1rem; justify-items: center; background: none; border: none; }
+.leaves { display: grid; gap: 0.6rem; justify-items: center; background: none; border: none; }
 .leaf {
-  position: relative; width: 20rem; height: 7rem; border: none; background: none;
+  position: relative; width: 20rem; height: 6.3rem; border: none; background: none;
   color: #fff; cursor: pointer; font: inherit; font-size: 1.25rem; font-weight: 600;
   transition: transform 0.15s;
 }

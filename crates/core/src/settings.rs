@@ -119,7 +119,7 @@ impl Default for MatchSettings {
             resource_density: Level::Normal,
             starting_resources: Level::Normal,
             game_speed: GameSpeed::Normal,
-            biome: Biome::Picnic,
+            biome: Biome::Random,
             events: true,
             disabled: Vec::new(),
             map_revealed: false,
@@ -228,5 +228,15 @@ mod tests {
         assert_eq!(f.team_of(0), f.team_of(1));
         assert_eq!(f.team_of(2), f.team_of(3));
         assert_ne!(f.team_of(0), f.team_of(2));
+    }
+}
+
+#[cfg(test)]
+mod default_tests {
+    use super::*;
+
+    #[test]
+    fn the_default_biome_is_random() {
+        assert_eq!(MatchSettings::default().biome, Biome::Random);
     }
 }

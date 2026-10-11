@@ -107,6 +107,7 @@ function element(item) {
       label.append(check, make("span", "", t.label));
       box.append(label);
     });
+    wrap.classList.add("toggles-field");
     wrap.append(make("label", "", item.label), box);
     return wrap;
   }
@@ -141,6 +142,7 @@ function drawMenus() {
   panels.replaceChildren();
   ui.panels.forEach((p) => {
     const box = make("div", "panel " + p.kind);
+    if (p.single) box.classList.add("single");
     if (p.heading) box.append(make("h2", "", p.heading));
     p.items.forEach((item) => box.append(p.kind === "leaves" ? leaf(item) : element(item)));
     panels.append(box);
