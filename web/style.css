@@ -28,6 +28,8 @@ body {
 .menus {
   height: 100%;
   overflow: auto;
+  /* The chosen leaf slides out past the right edge: no scroll bar for it. */
+  overflow-x: hidden;
   padding: 2rem 1rem 4rem;
   background:
     radial-gradient(ellipse at 20% 10%, #4a3a2a 0, transparent 60%),
@@ -74,8 +76,15 @@ table.pairs td:first-child { color: var(--muted); white-space: nowrap; width: 12
   transition: transform 0.15s;
 }
 .leaf:hover { transform: rotate(-2deg) scale(1.04); }
-.leaf .leaf-shape { position: absolute; inset: 0; width: 100%; height: 100%; }
-.leaf .leaf-shape path { fill: var(--leaf); stroke: var(--leaf-dark); stroke-width: 3; }
+.leaf .leaf-shape { position: absolute; inset: 0; width: 100%; height: 100%; display: none; }
+.leaf .leaf-shape path { fill: var(--leaf); stroke: var(--leaf-dark); stroke-width: 3; stroke-linejoin: round; }
+/* One kind of leaf per button, in order: oak, maple, willow, lily pad. */
+.leaf:nth-child(4n + 1) .oak, .leaf:nth-child(4n + 2) .maple,
+.leaf:nth-child(4n + 3) .willow, .leaf:nth-child(4n + 4) .lily { display: block; }
+.leaf .oak path { fill: #5f8a2c; stroke: #3b5a1a; }
+.leaf .maple path { fill: #3f8f45; stroke: #255a2a; }
+.leaf .willow path { fill: #74a046; stroke: #46682a; }
+.leaf .lily path { fill: #3a7d3a; stroke: #23502a; }
 .leaf .leaf-shape .vein { fill: none; stroke: var(--leaf-vein); stroke-width: 2; opacity: 0.7; }
 .leaf .leaf-text { position: relative; text-shadow: 0 2px 2px rgba(0, 0, 0, 0.6); }
 .leaf .ant { position: absolute; width: 3.4rem; height: 1.7rem; right: -4rem; top: 2.6rem; opacity: 0; }
@@ -115,7 +124,32 @@ table.pairs td:first-child { color: var(--muted); white-space: nowrap; width: 12
 .qitem .icon { width: 1.9rem; height: 1.9rem; display: block; }
 .gbtn .icon { position: absolute; right: 0.15rem; top: 0.9rem; width: 2.3rem; height: 2.3rem; opacity: 0.95; pointer-events: none; }
 .gbtn .label { position: relative; z-index: 1; text-shadow: 0 1px 2px #000; }
+/* All Ants: its short form, ALL, where other buttons have a picture. */
+.gbtn .icon-text {
+  position: absolute; right: 0.25rem; top: 1.35rem; font-size: 0.95rem; font-weight: 800;
+  letter-spacing: 0.04em; color: var(--accent); pointer-events: none;
+}
+.gbtn .icon-text:empty { display: none; }
+/* The tier a button needs, as a small digit in the bottom-right corner. */
+.gbtn .tier {
+  position: absolute; right: 0.15rem; bottom: 0.15rem; min-width: 0.9rem; height: 0.9rem; z-index: 1;
+  font-size: 0.6rem; font-weight: 700; line-height: 0.9rem; text-align: center; border-radius: 3px;
+  color: var(--soil); background: var(--muted); pointer-events: none;
+}
+.gbtn .tier:empty { display: none; }
 .qitem .fill { position: absolute; left: 0; bottom: 0; height: 3px; background: var(--accent); }
+.qitem .count {
+  position: absolute; right: 1px; bottom: 3px; font-size: 0.68rem; font-weight: 700; line-height: 1;
+  color: var(--ink); text-shadow: 0 0 2px #000, 0 0 2px #000;
+}
+.qitem .count:empty { display: none; }
+.controls { display: flex; gap: 0.3rem; }
+.control {
+  font: inherit; font-size: 0.78rem; color: var(--ink); background: var(--soil-3);
+  border: 1px solid var(--line); border-radius: 6px; padding: 0.15rem 0.5rem; cursor: pointer; white-space: nowrap;
+}
+.control:hover { background: var(--leaf-dark); }
+.control.active { color: var(--soil); background: var(--accent); border-color: var(--accent); }
 .flags { display: flex; gap: 0.5rem; }
 .flag { color: var(--bad); font-weight: 700; font-size: 0.85rem; }
 .clock { font-variant-numeric: tabular-nums; color: var(--muted); }
@@ -149,9 +183,17 @@ table.pairs td:first-child { color: var(--muted); white-space: nowrap; width: 12
 }
 .gbtn .k { position: relative; z-index: 1; align-self: flex-start; margin-top: auto; font-weight: 700; color: var(--accent); }
 .gbtn.empty { visibility: hidden; }
+.gbtn.empty > * { display: none; }
 .gbtn.ready:hover { background: var(--leaf-dark); }
-.gbtn.unaffordable { color: var(--muted); }
-.gbtn.locked, .gbtn.disabled, .gbtn.max_rank { opacity: 0.4; }
+/* Three states, each plain at a glance: Ready is normal; not enough
+   resources greys the whole button and fades its picture; Locked and
+   Disabled are faded further and struck through with a dashed border. */
+.gbtn.unaffordable { color: var(--muted); background: #3a3632; border-color: #5a5550; }
+.gbtn.unaffordable .icon { filter: grayscale(1) brightness(0.8); opacity: 0.55; }
+.gbtn.locked, .gbtn.disabled { opacity: 0.35; border-style: dashed; background: var(--soil-2); }
+.gbtn.locked .icon, .gbtn.disabled .icon { filter: grayscale(1); }
+.gbtn.disabled .label { text-decoration: line-through; }
+.gbtn.max_rank { opacity: 0.45; }
 .gbtn.queued { outline: 1px dashed var(--accent); }
 .gbtn.active { background: var(--leaf); border-color: var(--leaf-vein); }
 .minimap {

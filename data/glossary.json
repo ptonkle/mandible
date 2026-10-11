@@ -50,5 +50,12 @@
  "Flyer": "Flies over walls; rock and dirt still block.",
  "Brute": "Heavy melee: every hit deals Splash.",
  "Bomber": "Dies on purpose to deal Splash.",
- "Duration": "How long it takes, in seconds."
+ "Duration": "How long it takes, in seconds.",
+ "Sandbox": "Your colony has unlimited resources and starts at Tier 3.",
+ "Map Revealed": "Every colony starts with the whole map Explored, but not Visible.",
+ "Auto-Scout": "While on, one combat ant explores the map by itself.",
+ "Spectating": "No seat is You: you watch the match.",
+ "Pause": "Stops time in a Sandbox match or while Spectating.",
+ "Time Scale": "Runs time at ×½, ×1, ×2 or ×4 in a Sandbox match or while Spectating.",
+ "Fog of War": "Everything a colony cannot see right now. Off shows the whole map."
 }
