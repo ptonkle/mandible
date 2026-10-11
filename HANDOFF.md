@@ -53,6 +53,7 @@ The details are in `SECOND-ORDER.md` rows 37–40.
 - **Updating:** `./scripts/pages.sh` rebuilds the game and copies it into that folder. Then commit and push there. The site's commits use author `ptonk <65458712+ptonkle@users.noreply.github.com>`.
 - **Privacy:** the published files hold no personal names. `build.sh` maps the home folder to `~` in paths embedded in the wasm.
 - **Check:** `BUILDER_ORIGIN=https://ptonkle.github.io/mandible .venv/bin/python tests/browser/check.py` passed in chromium, firefox and webkit, against the live site.
+- **Redeployed 2026-10-11** from commit `3dd622e` (site commit `46d17d5`): lobby, Ready Up, Rematch, sound, volume slider, maps and balance. Name scan clean; live browser check passed in all three engines.
 
 ## What passed
 
@@ -74,8 +75,9 @@ ONLINE MATCH CHECK PASSED in chromium, firefox, webkit
 ```
 
 Slow checks (run by hand, results in `MEASUREMENTS.md`):
-- **Performance:** 2.8 ms average tick with 1,200 ants.
-- **AI ladder:** Imago beat Pupa 10/10 and Pupa beat Larva 10/10.
+- **Performance:** 2.9 ms average tick with 1,200 ants (latest, commit `3dd622e`).
+- **AI ladder (latest):** Imago beat Pupa 9/10 on Tunnels, 10/10 on Open Ground and Maze; Pupa beat Larva 10/10 on every map type. Typical match: Tunnels 5:10, Open Ground 5:19, Maze 6:02.
+- **Latest `check.sh` and `check-online.sh`** (commit `b286aef` and the slider): BUILDER CHECK PASSED; ONLINE CHECK PASSED in three engines.
 
 ## What remains
 
