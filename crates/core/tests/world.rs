@@ -355,7 +355,7 @@ fn place_near_home(w: &mut World, kind: StructureKind) -> u32 {
     w.structures
         .iter()
         .filter(|s| !s.complete)
-        .last()
+        .next_back()
         .expect("placed")
         .id
 }
