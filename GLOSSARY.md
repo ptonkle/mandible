@@ -249,7 +249,7 @@ Rejected names. Do not reuse them without passing the naming test.
 | Cancel | ◆ | Remove an item from the queue and get its resources back. | delete, dequeue |
 | Retreat | ★ | A toggle. While on, every ant except Gatherers and Builders pulls back towards its colony's nests. | recall, fall back, return, regroup |
 | Auto-Scout | ◆ | A toggle on the Colony tab. While on, one combat ant, chosen by the simulation, explores by itself: unexplored chambers nearest first, then chambers out of sight. Shown Active while on. | auto-explore, scout mode |
-| Gather Focus | ◆ | Which resource Harvester Ants favour: Balanced (Food 2 : Nectar 1 : Leaves 1), or Food, Nectar or Leaves (3 : 1 : 1 toward it). | priority, eco setting, worker split |
+| Gather Focus | ◆ | Which resource Harvester Ants favour: Balanced (Food 3 : Nectar 1 : Leaves 2; was 2 : 1 : 1 until TRIAGE row 52), or Food, Nectar or Leaves (3 : 1 : 1 toward it). | priority, eco setting, worker split |
 | Balanced | ◆ | The default Gather Focus. | even, default |
 | Placement Blocked | ◆ | Notice: the blueprint cannot go there (rock, another structure, a node, not explored, or too far from a queen). | invalid placement, can't build here |
 | Not Enough | ◆ | Notice prefix for a missing resource: "Not Enough Nectar". | insufficient, need more |
