@@ -4,15 +4,23 @@
 //! player knows from the map's symmetry.
 //!
 //! Difficulty shapes the plan: Larva decides slowly, keeps one nest, skips
-//! upgrades and attacks late; Pupa follows a standard plan with one
-//! expansion and upgrades; Imago decides often, builds a bigger economy,
-//! expands twice, counters what it has seen, defends, and retreats from
-//! fights it is losing.
+//! upgrades and attacks late; Pupa follows a standard plan with a second
+//! nest and upgrades. Imago decides often and plays to the economy: Food is
+//! the scarce resource, so it trains only the Harvester Ants its nodes can
+//! use, scouts every chamber on its side of the map, saves for Tier 2 and
+//! its first hatcheries instead of spending on Soldier Ants, fields Turtle
+//! and Acid Ants with the upgrades that suit them, meets intruders with the
+//! whole army, and retreats from fights it is losing.
+//!
+//! Every difficulty finishes a match: the army attacks known queens and
+//! hatcheries first, the army needed to attack shrinks as the match runs
+//! long, and when the enemy is nowhere known the army splits to sweep the
+//! map.
 
 use serde::{Deserialize, Serialize};
 
 use crate::fixed::{Pos, CELL};
-use crate::rules::{evolve_cost, Role, Species, StructureKind, Upgrade, POP_CAP};
+use crate::rules::{evolve_cost, Resource, Species, StructureKind, Upgrade, POP_CAP};
 use crate::settings::Difficulty;
 use crate::world::{Amount, Command, Focus, Work, World};
 
@@ -38,7 +46,7 @@ pub fn due(tick: i32, colony: usize, d: Difficulty) -> bool {
 struct Plan {
     harvesters: i32,
     carpenters: i32,
-    expansions: i32,
+    nests: i32,
     upgrades: bool,
     attack_pop: i32,
     t2_after: i32,
@@ -50,7 +58,7 @@ fn plan(d: Difficulty) -> Plan {
         Difficulty::Larva => Plan {
             harvesters: 9,
             carpenters: 2,
-            expansions: 0,
+            nests: 0,
             upgrades: false,
             attack_pop: 30,
             t2_after: 2000,
@@ -59,20 +67,20 @@ fn plan(d: Difficulty) -> Plan {
         Difficulty::Pupa => Plan {
             harvesters: 16,
             carpenters: 3,
-            expansions: 1,
+            nests: 1,
             upgrades: true,
             attack_pop: 34,
             t2_after: 900,
             t3_after: 1900,
         },
         Difficulty::Imago => Plan {
-            harvesters: 22,
-            carpenters: 4,
-            expansions: 2,
+            harvesters: 14,
+            carpenters: 3,
+            nests: 2,
             upgrades: true,
-            attack_pop: 30,
-            t2_after: 600,
-            t3_after: 1400,
+            attack_pop: 33,
+            t2_after: 500,
+            t3_after: 5000,
         },
     }
 }
@@ -119,10 +127,22 @@ pub fn find_spot(
 /// The army this difficulty wants, as weights per species.
 fn army_mix(w: &World, colony: u8, d: Difficulty) -> Vec<(Species, i32)> {
     let tier = w.colonies[colony as usize].tier;
-    let mut mix = vec![(Species::Soldier, 4)];
+    let soldiers = if d == Difficulty::Imago && tier >= 2 {
+        1
+    } else {
+        4
+    };
+    let mut mix = vec![(Species::Soldier, soldiers)];
     if tier >= 2 {
         match d {
             Difficulty::Larva => mix.push((Species::Fire, 3)),
+            Difficulty::Imago => {
+                // Turtle Ants shrug off small hits (flat Armor); Acid Ants
+                // stand behind them; Nurse Ants keep both alive.
+                mix.push((Species::Acid, 4));
+                mix.push((Species::Turtle, 4));
+                mix.push((Species::Nurse, 1));
+            }
             _ => {
                 mix.push((Species::Acid, 4));
                 mix.push((Species::Turtle, 2));
@@ -163,12 +183,15 @@ struct Seen {
     walls: i32,
     army_pop: i32,
     near_home: i32,
+    /// The enemy ant nearest one of our queens, among those near a nest.
+    intruder: Option<Pos>,
 }
 
 fn enemy_seen(w: &World, colony: u8) -> Seen {
     let vis = w.team_visible(colony);
     let mut s = Seen::default();
     let home = w.nearest_queen(colony, Pos::default()).map(|q| q.pos);
+    let mut best: Option<(i32, Pos)> = None;
     for a in &w.ants {
         if w.allied(a.colony, colony) {
             continue;
@@ -186,10 +209,17 @@ fn enemy_seen(w: &World, colony: u8) -> Seen {
                 s.big += 1;
             }
             if let Some(h) = home {
-                if w.queens(colony).any(|q| q.pos.dist(a.pos) < 24 * CELL)
-                    || a.pos.dist(h) < 24 * CELL
-                {
+                let d = w
+                    .queens(colony)
+                    .map(|q| q.pos.dist(a.pos))
+                    .min()
+                    .unwrap_or(i32::MAX)
+                    .min(a.pos.dist(h));
+                if d < 24 * CELL {
                     s.near_home += 1;
+                    if best.map(|b: (i32, Pos)| d < b.0).unwrap_or(true) {
+                        best = Some((d, a.pos));
+                    }
                 }
             }
         }
@@ -202,13 +232,16 @@ fn enemy_seen(w: &World, colony: u8) -> Seen {
             }
         }
     }
+    s.intruder = best.map(|b| b.1);
     s
 }
 
-/// Where to attack: the nearest known structure of a living enemy; failing
-/// that, the nearest enemy ants in sight; failing that, the nearest enemy
-/// home chamber that still has a queen standing, else our own home (where
-/// an enemy army with nothing left to destroy is likely heading).
+/// Where to attack, nearest the army (its All Ants waypoint) first: enemy
+/// ants in sight close to the army; then known enemy queens and hatcheries,
+/// which keep a colony alive, then its other structures; then the enemy
+/// home chambers not yet seen; then enemy ants in sight anywhere; then the
+/// chambers the team has never seen. None means every chamber has been seen
+/// and nothing is in sight, so the army must sweep (see `sweep`).
 fn attack_point(w: &World, colony: u8) -> Option<Pos> {
     let from = w
         .nearest_queen(colony, Pos::default())
@@ -217,24 +250,14 @@ fn attack_point(w: &World, colony: u8) -> Option<Pos> {
             let h = w.map.home(colony as usize);
             Some(Pos::of_cell(h.cx, h.cy))
         })?;
+    let army_at = w.colonies[colony as usize].waypoints[Species::Fire.index()]
+        .first()
+        .copied()
+        .unwrap_or(from);
     let explored = w.team_explored(colony);
     let visible = w.team_visible(colony);
     let enemy = |c: u8| !w.allied(c, colony) && !w.colonies[c as usize].defeated;
-    let nearest = |ps: Vec<Pos>| ps.into_iter().min_by_key(|p| (p.dist2(from), p.x, p.y));
-    let known: Vec<Pos> = w
-        .structures
-        .iter()
-        .filter(|s| {
-            enemy(s.colony) && {
-                let (x, y) = s.pos.cell();
-                explored.get(w.map.idx(x, y))
-            }
-        })
-        .map(|s| s.pos)
-        .collect();
-    if let Some(p) = nearest(known) {
-        return Some(p);
-    }
+    let nearest_to = |at: Pos, ps: Vec<Pos>| ps.into_iter().min_by_key(|p| (p.dist2(at), p.x, p.y));
     let seen: Vec<Pos> = w
         .ants
         .iter()
@@ -246,9 +269,36 @@ fn attack_point(w: &World, colony: u8) -> Option<Pos> {
         })
         .map(|a| a.pos)
         .collect();
-    if let Some(p) = nearest(seen) {
+    let close: Vec<Pos> = seen
+        .iter()
+        .copied()
+        .filter(|p| p.dist(army_at) < 16 * CELL)
+        .collect();
+    if let Some(p) = nearest_to(army_at, close) {
         return Some(p);
     }
+    let known = |makes_ants: bool| -> Vec<Pos> {
+        w.structures
+            .iter()
+            .filter(|s| {
+                enemy(s.colony)
+                    && s.kind.makes_ants() == makes_ants
+                    && s.kind != StructureKind::Wall
+                    && {
+                        let (x, y) = s.pos.cell();
+                        explored.get(w.map.idx(x, y))
+                    }
+            })
+            .map(|s| s.pos)
+            .collect()
+    };
+    if let Some(p) = nearest_to(army_at, known(true)) {
+        return Some(p);
+    }
+    if let Some(p) = nearest_to(army_at, known(false)) {
+        return Some(p);
+    }
+    let nearest = |ps: Vec<Pos>| nearest_to(from, ps);
     let homes: Vec<Pos> = w
         .colonies
         .iter()
@@ -263,6 +313,9 @@ fn attack_point(w: &World, colony: u8) -> Option<Pos> {
         })
         .collect();
     if let Some(p) = nearest(homes) {
+        return Some(p);
+    }
+    if let Some(p) = nearest_to(army_at, seen) {
         return Some(p);
     }
     // Hunting: an enemy is alive but nowhere known. Search chambers nobody
@@ -284,17 +337,96 @@ fn attack_point(w: &World, colony: u8) -> Option<Pos> {
     if let Some(p) = nearest(unseen) {
         return Some(p);
     }
-    let dark: Vec<Pos> = w
-        .map
-        .chambers
-        .iter()
-        .filter(|ch| !visible.get(w.map.idx(ch.cx, ch.cy)))
-        .map(|ch| Pos::of_cell(ch.cx, ch.cy))
-        .collect();
-    if dark.is_empty() {
-        return Some(from);
+    // Every chamber has been seen and nothing is in sight: sweep.
+    None
+}
+
+/// Every chamber centre and a sample of tunnel cells, in a serpentine tour
+/// of the map, band by band.
+fn sweep_tour(w: &World) -> Vec<Pos> {
+    let band = 30;
+    let step = 6;
+    let mut spots: Vec<(i32, i32)> = w.map.chambers.iter().map(|ch| (ch.cx, ch.cy)).collect();
+    for y in (step / 2..w.map.h).step_by(step as usize) {
+        for x in (step / 2..w.map.w).step_by(step as usize) {
+            if w.map.is_floor(x, y) && w.map.chamber_at(x, y).is_none() {
+                spots.push((x, y));
+            }
+        }
     }
-    Some(dark[(w.tick / 300) as usize % dark.len()])
+    let mut tour: Vec<(i32, i32, i32)> = spots
+        .into_iter()
+        .map(|(x, y)| {
+            let b = y / band;
+            (b, if b % 2 == 0 { x } else { -x }, y)
+        })
+        .collect();
+    tour.sort();
+    tour.into_iter()
+        .map(|(b, x, y)| Pos::of_cell(if b % 2 == 0 { x } else { -x }, y))
+        .collect()
+}
+
+/// Hunting an enemy that is alive but nowhere known: the army splits over
+/// four waypoints spread around the sweep tour. Each waypoint moves on along
+/// the tour once its spot is in sight, so the waypoints themselves remember
+/// where the sweep has got to.
+fn sweep(w: &World, colony: u8, from: Pos) -> Vec<Command> {
+    const GROUPS: usize = 4;
+    let tour = sweep_tour(w);
+    let n = tour.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    let visible = w.team_visible(colony);
+    let seen = |k: usize| {
+        let (x, y) = tour[k % n].cell();
+        visible.get(w.map.idx(x, y))
+    };
+    let index_of = |p: Pos| (0..n).min_by_key(|&k| (tour[k].dist2(p), k)).unwrap_or(0);
+    let next_dark = |k: usize| (0..n).map(|s| (k + s) % n).find(|&j| !seen(j));
+    let cur = &w.colonies[colony as usize].waypoints[Species::Fire.index()];
+    let mut want: Vec<usize> = if cur.len() == GROUPS {
+        cur.iter().map(|p| index_of(*p)).collect()
+    } else {
+        let k0 = index_of(from);
+        (0..GROUPS).map(|q| (k0 + q * n / GROUPS) % n).collect()
+    };
+    for k in want.iter_mut() {
+        if cur.len() != GROUPS || seen(*k) {
+            if let Some(j) = next_dark(*k) {
+                *k = j;
+            }
+        }
+    }
+    let unchanged = cur.len() == GROUPS
+        && cur
+            .iter()
+            .zip(&want)
+            .all(|(p, k)| p.dist(tour[*k]) <= 6 * CELL);
+    if unchanged {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    for (q, k) in want.iter().enumerate() {
+        let (x, y) = tour[*k].cell();
+        if q == 0 {
+            out.push(Command::SetWaypoint {
+                species: None,
+                x,
+                y,
+            });
+        } else {
+            for s in Species::ALL.into_iter().filter(|s| s.is_combat()) {
+                out.push(Command::SetWaypoint {
+                    species: Some(s),
+                    x,
+                    y,
+                });
+            }
+        }
+    }
+    out
 }
 
 pub fn decide(w: &World, colony: u8, d: Difficulty) -> Vec<Command> {
@@ -304,9 +436,10 @@ pub fn decide(w: &World, colony: u8, d: Difficulty) -> Vec<Command> {
     let p = plan(d);
     let n = counts(w, colony);
     let queens: Vec<Pos> = w.queens(colony).map(|q| q.pos).collect();
-    let Some(&home) = queens.first() else {
-        return out;
-    };
+    let home = queens.first().copied().unwrap_or_else(|| {
+        let h = w.map.home(ci);
+        Pos::of_cell(h.cx, h.cy)
+    });
     let pop = w.population(colony) + w.queued_pop(colony);
     let housing = w.housing(colony);
     let blueprints: Vec<StructureKind> = w
@@ -328,201 +461,252 @@ pub fn decide(w: &World, colony: u8, d: Difficulty) -> Vec<Command> {
         .filter(|a| a.colony == colony && a.species.is_combat())
         .map(|a| a.species.stats().pop)
         .sum();
+    let hatcheries = w
+        .structures
+        .iter()
+        .filter(|s| {
+            s.colony == colony && s.complete && matches!(s.kind, StructureKind::Hatchery(_))
+        })
+        .count();
     // The army a difficulty keeps at home before spending on anything else.
     let floor = match d {
         Difficulty::Larva => 0,
         Difficulty::Pupa => w.tick / 100,
-        Difficulty::Imago => w.tick / 90,
+        // Imago spends the opening on Harvester Ants, Tier 2 and its first
+        // hatcheries, with a small guard of Soldier Ants; it trains in
+        // earnest once the hatcheries stand.
+        Difficulty::Imago if hatcheries < 2 => ((w.tick - 600) / 120).clamp(0, 8),
+        Difficulty::Imago => ((w.tick - 900) / 70).max(0),
     }
     .min(24);
-    let safe = army_pop >= floor;
+    let threat = enemy_seen(w, colony).near_home;
+    let safe = army_pop >= floor && !(d == Difficulty::Imago && threat >= 3 && army_pop < 40);
 
-    // 1. Housing: never stall on Housing Full.
-    let pending_housing = blueprints
-        .iter()
-        .filter(|k| matches!(k, StructureKind::BroodCell | StructureKind::Queen))
-        .count() as i32;
-    if housing < POP_CAP && pop + 6 >= housing + pending_housing * 15 {
-        let cost = StructureKind::BroodCell.stats().cost;
-        if afford(&stock, &cost) {
-            if let Some((x, y)) = find_spot(w, colony, StructureKind::BroodCell, home, 6) {
-                out.push(Command::Place {
-                    kind: StructureKind::BroodCell,
-                    x,
-                    y,
-                    x2: x,
-                    y2: y,
-                });
-                spend(&mut stock, &cost);
-            }
-        }
-    }
-
-    // 2. Workers come first: one queued per queen while short.
-    let harvester_goal = p.harvesters + (queens.len() as i32 - 1) * 8;
-    let queued_harvesters = w
-        .queens(colony)
-        .flat_map(|q| q.lane.iter())
-        .filter(|q| matches!(q.work, Work::Train(Species::Harvester)))
-        .count();
-    let workers_short = n[Species::Harvester.index()] < harvester_goal;
-    if workers_short && queued_harvesters < queens.len() {
-        let cost = Species::Harvester.stats().cost;
-        if afford(&stock, &cost) {
-            out.push(Command::Train {
-                species: Species::Harvester,
-                amount: Amount::One,
-            });
-            spend(&mut stock, &cost);
-        }
-    }
-    if n[Species::Carpenter.index()] < p.carpenters {
-        let cost = Species::Carpenter.stats().cost;
-        if afford(&stock, &cost) {
-            out.push(Command::Train {
-                species: Species::Carpenter,
-                amount: Amount::One,
-            });
-            spend(&mut stock, &cost);
-        }
-    }
-
-    // 3. Gather Focus: the resource furthest below a wanted ratio, which
-    // leans to Nectar once higher tiers need it.
-    let want = if c.tier >= 2 { [3, 2, 1] } else { [3, 1, 1] };
-    let short = (0..3).min_by_key(|&i| (stock[i] / want[i], i)).unwrap_or(0);
-    let focus = if !blueprints.is_empty() && stock[2] < 60 {
-        Focus::Leaves
-    } else if stock[short] / want[short] >= 150 {
-        Focus::Balanced
-    } else {
-        [Focus::Food, Focus::Nectar, Focus::Leaves][short]
-    };
-    if focus != c.focus {
-        out.push(Command::Focus { focus });
-    }
-
-    let mix = army_mix(w, colony, d);
-    let mut train_army = |stock: &mut [i32; 3], out: &mut Vec<Command>| {
-        let total: i32 = mix.iter().map(|(_, wt)| *wt).sum::<i32>().max(1);
-        let army_now: i32 = Species::ALL
+    // Without a queen there is no economy to run, but the army still
+    // fights on.
+    if !queens.is_empty() {
+        // 1. Housing: never stall on Housing Full.
+        let pending_housing = blueprints
             .iter()
-            .filter(|s| s.is_combat())
-            .map(|s| n[s.index()])
-            .sum::<i32>()
-            .max(1);
-        let mut best: Option<(i64, Species)> = None;
-        for (s, wt) in &mix {
-            if w.can_train(colony, *s).is_err() || !afford(stock, &s.stats().cost) {
-                continue;
-            }
-            let gap = (*wt as i64) * army_now as i64 - n[s.index()] as i64 * total as i64;
-            if best.map(|b| gap > b.0).unwrap_or(true) {
-                best = Some((gap, *s));
-            }
-        }
-        if let Some((_, s)) = best {
-            let cost = s.stats().cost;
-            if pop + s.stats().pop <= housing + 8 {
-                let ten = d != Difficulty::Larva && (0..3).all(|i| stock[i] >= cost[i] * 5);
-                out.push(Command::Train {
-                    species: s,
-                    amount: if ten { Amount::Ten } else { Amount::One },
-                });
-                let k = if ten { 5 } else { 1 };
-                for i in 0..3 {
-                    stock[i] -= cost[i] * k;
+            .filter(|k| matches!(k, StructureKind::BroodCell | StructureKind::Queen))
+            .count() as i32;
+        if housing < POP_CAP && pop + 6 >= housing + pending_housing * 15 {
+            let cost = StructureKind::BroodCell.stats().cost;
+            if afford(&stock, &cost) {
+                if let Some((x, y)) = find_spot(w, colony, StructureKind::BroodCell, home, 6) {
+                    out.push(Command::Place {
+                        kind: StructureKind::BroodCell,
+                        x,
+                        y,
+                        x2: x,
+                        y2: y,
+                    });
+                    spend(&mut stock, &cost);
                 }
             }
         }
-    };
 
-    // 4. Below the floor, the army comes before anything else, but never
-    // crowds Harvester Ants out of a queen's lane.
-    let lane_room = w.queens(colony).any(|q| q.lane.len() < 3);
-    if !safe && (lane_room || !workers_short) {
-        train_army(&mut stock, &mut out);
-    } else {
-        // 5. Tech: Evolve, hatcheries, expansions, upgrades.
-        if c.tier < 3 && !w.evolving(colony) {
-            let after = if c.tier == 1 { p.t2_after } else { p.t3_after };
-            let (cost, _) = evolve_cost(c.tier + 1);
-            if w.tick >= after && afford(&stock, &cost) {
-                out.push(Command::Evolve);
+        // 2. Harvester Ants come first: one queued per queen while short.
+        let harvester_goal = if d == Difficulty::Imago {
+            // Enough to saturate every node near a nest.
+            node_room(w, colony).clamp(p.harvesters, 64)
+        } else {
+            p.harvesters + (queens.len() as i32 - 1) * 8
+        };
+        let queued_harvesters = w
+            .queens(colony)
+            .flat_map(|q| q.lane.iter())
+            .filter(|q| matches!(q.work, Work::Train(Species::Harvester)))
+            .count();
+        let harvesters_short = n[Species::Harvester.index()] < harvester_goal;
+        if harvesters_short && queued_harvesters < queens.len() {
+            let cost = Species::Harvester.stats().cost;
+            if afford(&stock, &cost) {
+                out.push(Command::Train {
+                    species: Species::Harvester,
+                    amount: Amount::One,
+                });
                 spend(&mut stock, &cost);
             }
         }
-        for (s, _) in &mix {
-            if s.from_queen() || w.has_hatchery(colony, *s) {
-                continue;
-            }
-            let kind = StructureKind::Hatchery(*s);
-            if blueprints.contains(&kind) || c.tier < s.stats().tier {
-                continue;
-            }
-            let cost = kind.stats().cost;
-            if afford(&stock, &cost) {
-                if let Some((x, y)) = find_spot(w, colony, kind, home, 7) {
-                    out.push(Command::Place {
-                        kind,
-                        x,
-                        y,
-                        x2: x,
-                        y2: y,
-                    });
-                    spend(&mut stock, &cost);
-                }
-            }
-            break; // one new hatchery at a time
-        }
-        let have_expansions = queens.len() as i32 - 1
-            + blueprints
-                .iter()
-                .filter(|k| **k == StructureKind::Queen)
-                .count() as i32;
-        let expand_at = match d {
-            Difficulty::Imago => 1100 + have_expansions * 1000,
-            _ => 1600,
+        let big_blueprints = blueprints
+            .iter()
+            .filter(|k| !matches!(k, StructureKind::BroodCell | StructureKind::Wall))
+            .count() as i32;
+        let carpenter_goal = if d == Difficulty::Imago {
+            (p.carpenters + big_blueprints).min(8)
+        } else {
+            p.carpenters
         };
-        if have_expansions < p.expansions && w.tick >= expand_at {
-            let cost = StructureKind::Queen.stats().cost;
+        if n[Species::Carpenter.index()] < carpenter_goal {
+            let cost = Species::Carpenter.stats().cost;
             if afford(&stock, &cost) {
-                if let Some((x, y)) = expansion_spot(w, colony, home) {
-                    out.push(Command::Place {
-                        kind: StructureKind::Queen,
-                        x,
-                        y,
-                        x2: x,
-                        y2: y,
-                    });
-                    spend(&mut stock, &cost);
-                }
+                out.push(Command::Train {
+                    species: Species::Carpenter,
+                    amount: Amount::One,
+                });
+                spend(&mut stock, &cost);
             }
         }
-        if p.upgrades {
-            let wanted = [
-                Upgrade::GatherRate,
-                Upgrade::Damage,
-                Upgrade::Armor,
-                Upgrade::Health,
-                Upgrade::Species(Species::Acid),
-                Upgrade::Species(Species::Soldier),
-                Upgrade::CarryCapacity,
-            ];
-            for u in wanted {
-                if let Ok(rank) = w.can_research(colony, u) {
-                    let cost = u.cost(rank);
-                    if (0..3).all(|i| stock[i] >= cost[i] + 60) {
-                        out.push(Command::Research { upgrade: u });
-                        spend(&mut stock, &cost);
-                        break;
+
+        // 3. Gather Focus: the resource furthest below a wanted ratio, which
+        // leans to Nectar once higher tiers need it.
+        let want = if c.tier >= 2 { [3, 2, 1] } else { [3, 1, 1] };
+        let short = (0..3).min_by_key(|&i| (stock[i] / want[i], i)).unwrap_or(0);
+        let focus = if !blueprints.is_empty() && stock[2] < 60 {
+            Focus::Leaves
+        } else if stock[short] / want[short] >= 150 {
+            Focus::Balanced
+        } else {
+            [Focus::Food, Focus::Nectar, Focus::Leaves][short]
+        };
+        if focus != c.focus {
+            out.push(Command::Focus { focus });
+        }
+
+        let mix = army_mix(w, colony, d);
+        let train_army = |stock: &mut [i32; 3], out: &mut Vec<Command>, queen_ok: bool| {
+            let total: i32 = mix.iter().map(|(_, wt)| *wt).sum::<i32>().max(1);
+            let army_now: i32 = Species::ALL
+                .iter()
+                .filter(|s| s.is_combat())
+                .map(|s| n[s.index()])
+                .sum::<i32>()
+                .max(1);
+            let mut best: Option<(i64, Species)> = None;
+            for (s, wt) in &mix {
+                // Imago waits for the species it most wants rather than
+                // buying whatever is cheapest, so dear ants still get made.
+                let skip_unaffordable = d != Difficulty::Imago;
+                if w.can_train(colony, *s).is_err()
+                    || (skip_unaffordable && !afford(stock, &s.stats().cost))
+                    || (s.from_queen() && !queen_ok)
+                {
+                    continue;
+                }
+                let gap = (*wt as i64) * army_now as i64 - n[s.index()] as i64 * total as i64;
+                if best.map(|b| gap > b.0).unwrap_or(true) {
+                    best = Some((gap, *s));
+                }
+            }
+            if let Some((_, s)) = best {
+                let cost = s.stats().cost;
+                if pop + s.stats().pop <= housing + 8 && afford(stock, &cost) {
+                    let ten = d != Difficulty::Larva && (0..3).all(|i| stock[i] >= cost[i] * 5);
+                    out.push(Command::Train {
+                        species: s,
+                        amount: if ten { Amount::Ten } else { Amount::One },
+                    });
+                    let k = if ten { 5 } else { 1 };
+                    for i in 0..3 {
+                        stock[i] -= cost[i] * k;
                     }
                 }
             }
-        }
-        // 6. The rest goes to the army.
-        if lane_room || !workers_short {
-            train_army(&mut stock, &mut out);
+        };
+
+        // 4. Below the floor, the army comes before anything else, but never
+        // crowds Harvester Ants out of a queen's lane.
+        let lane_room = w.queens(colony).any(|q| q.lane.len() < 3);
+        if !safe && (lane_room || !harvesters_short) {
+            train_army(&mut stock, &mut out, true);
+        } else {
+            // 5. Tech: Evolve, hatcheries, new nests, upgrades. Imago saves
+            // up for the next step of its plan instead of spending the
+            // difference on more Soldier Ants.
+            let mut saving = false;
+            if c.tier < 3 && !w.evolving(colony) {
+                let after = if c.tier == 1 { p.t2_after } else { p.t3_after };
+                let (cost, _) = evolve_cost(c.tier + 1);
+                if w.tick >= after {
+                    if afford(&stock, &cost) {
+                        out.push(Command::Evolve);
+                        spend(&mut stock, &cost);
+                    } else if d == Difficulty::Imago {
+                        saving = true;
+                    }
+                }
+            }
+            for (s, _) in mix.iter().filter(|_| !saving) {
+                if s.from_queen() || w.has_hatchery(colony, *s) {
+                    continue;
+                }
+                let kind = StructureKind::Hatchery(*s);
+                if blueprints.contains(&kind) || c.tier < s.stats().tier {
+                    continue;
+                }
+                let cost = kind.stats().cost;
+                if afford(&stock, &cost) {
+                    if let Some((x, y)) = find_spot(w, colony, kind, home, 7) {
+                        out.push(Command::Place {
+                            kind,
+                            x,
+                            y,
+                            x2: x,
+                            y2: y,
+                        });
+                        spend(&mut stock, &cost);
+                    }
+                } else if d == Difficulty::Imago {
+                    saving = true;
+                }
+                break; // one new hatchery at a time
+            }
+            if !saving {
+                try_new_nest(w, colony, d, home, &mut stock, &mut out);
+            }
+            if p.upgrades && !saving && d != Difficulty::Imago {
+                let wanted = [
+                    Upgrade::GatherRate,
+                    Upgrade::Damage,
+                    Upgrade::Armor,
+                    Upgrade::Health,
+                    Upgrade::Species(Species::Acid),
+                    Upgrade::Species(Species::Soldier),
+                    Upgrade::CarryCapacity,
+                ];
+                for u in wanted {
+                    if let Ok(rank) = w.can_research(colony, u) {
+                        let cost = u.cost(rank);
+                        if (0..3).all(|i| stock[i] >= cost[i] + 60) {
+                            out.push(Command::Research { upgrade: u });
+                            spend(&mut stock, &cost);
+                            break;
+                        }
+                    }
+                }
+            }
+            if d == Difficulty::Imago && !saving && hatcheries >= 2 {
+                // Combat upgrades for the army it fields, in order; once there
+                // is an army to protect the wait, it saves for the next one.
+                let wanted = [
+                    Upgrade::Species(Species::Turtle),
+                    Upgrade::Armor,
+                    Upgrade::Damage,
+                    Upgrade::Species(Species::Acid),
+                    Upgrade::Health,
+                ];
+                if let Some((u, rank)) = wanted
+                    .into_iter()
+                    .find_map(|u| w.can_research(colony, u).ok().map(|r| (u, r)))
+                {
+                    let cost = u.cost(rank);
+                    if afford(&stock, &cost) {
+                        out.push(Command::Research { upgrade: u });
+                        spend(&mut stock, &cost);
+                    } else if army_pop >= 30 {
+                        saving = true;
+                    }
+                }
+            }
+            // 6. The rest goes to the army.
+            if d == Difficulty::Imago {
+                if !saving {
+                    train_army(&mut stock, &mut out, !harvesters_short);
+                }
+            } else if lane_room || !harvesters_short {
+                train_army(&mut stock, &mut out, true);
+            }
         }
     }
 
@@ -561,49 +745,104 @@ pub fn decide(w: &World, colony: u8, d: Difficulty) -> Vec<Command> {
             // Follow the nearest enemy structure as targets fall.
             let (x, y) = tp.cell();
             let cur = c.waypoints.iter().find_map(|v| v.first().copied());
-            if cur.map(|p| p.dist(tp) > 8 * CELL).unwrap_or(true) {
+            let split = c.waypoints[Species::Fire.index()].len() > 1;
+            if split || cur.map(|p| p.dist(tp) > 3 * CELL).unwrap_or(true) {
                 out.push(Command::SetWaypoint {
                     species: None,
                     x,
                     y,
                 });
             }
+        } else {
+            out.extend(sweep(w, colony, home));
         }
         return out;
     }
     if seen.near_home >= 3 && d != Difficulty::Larva {
-        // Defending: everyone waits at the nest.
-        if has_waypoint {
+        if let (Difficulty::Imago, Some(tp)) = (d, seen.intruder) {
+            // Defending: the whole army meets the intruders together,
+            // before they reach the Harvester Ants.
+            let cur = c.waypoints.iter().find_map(|v| v.first().copied());
+            if cur.map(|p| p.dist(tp) > 6 * CELL).unwrap_or(true) {
+                let (x, y) = tp.cell();
+                out.push(Command::SetWaypoint {
+                    species: None,
+                    x,
+                    y,
+                });
+            }
+        } else if has_waypoint {
+            // Defending: everyone waits at the nest.
             clear_all(&mut out);
         }
         return out;
     }
-    if army_pop >= attack_pop || (w.tick > 2400 && army_pop >= 16) {
-        if let Some(tp) = attack_point(w, colony) {
-            let (x, y) = tp.cell();
-            out.push(Command::SetWaypoint {
-                species: None,
-                x,
-                y,
-            });
-            out.push(Command::AiState {
-                attacking: true,
-                wave: c.ai.wave,
-            });
+    let all_ants_wp = c.waypoints[Species::Fire.index()].first().copied();
+    let defence_wp = all_ants_wp
+        .map(|p| queens.iter().any(|q| q.dist(p) < 26 * CELL))
+        .unwrap_or(false);
+    if d == Difficulty::Imago && defence_wp && seen.near_home == 0 {
+        // The defence is over: back to the nest.
+        clear_all(&mut out);
+        return out;
+    }
+    let late = if d == Difficulty::Imago {
+        (3200, 20)
+    } else {
+        (3000, 20)
+    };
+    // Late in a match the army needed to attack shrinks, so that a match
+    // where both sides are out of Food still ends. With no queen and no
+    // hatchery left there is nothing to defend and
+    // nothing to wait for: whatever army is left goes hunting.
+    let nothing_to_lose = queens.is_empty() && hatcheries == 0;
+    if army_pop >= attack_pop
+        || (w.tick > late.0 && army_pop >= (late.1 - (w.tick - late.0) / 300).max(6))
+        || (nothing_to_lose && army_pop > 0)
+    {
+        match attack_point(w, colony) {
+            Some(tp) => {
+                let (x, y) = tp.cell();
+                out.push(Command::SetWaypoint {
+                    species: None,
+                    x,
+                    y,
+                });
+            }
+            None => out.extend(sweep(w, colony, home)),
         }
+        out.push(Command::AiState {
+            attacking: true,
+            wave: c.ai.wave,
+        });
         return out;
     }
     // Scouting while building up: Soldier Ants look at the nearest chamber
-    // the team has not seen, so expansions can be found.
-    if p.expansions > 0 && !has_waypoint && w.tick > 250 {
-        let explored = w.team_explored(colony);
+    // the team has not seen, so chambers for new nests can be found. Imago moves on to
+    // the next one once a chamber has been seen, so it learns where every
+    // Crumb Pile is before its own run out.
+    let explored = w.team_explored(colony);
+    let scout_wp = c.waypoints[Species::Soldier.index()].first().copied();
+    let scouted = scout_wp
+        .map(|p| {
+            let (x, y) = p.cell();
+            all_ants_wp.is_none() && explored.get(w.map.idx(x, y))
+        })
+        .unwrap_or(false);
+    let rescout = d == Difficulty::Imago && scouted;
+    if p.nests > 0 && (!has_waypoint || rescout) && w.tick > 250 {
         let target = w
             .map
             .chambers
             .iter()
             .filter(|ch| ch.home.is_none() && !explored.get(w.map.idx(ch.cx, ch.cy)))
+            .filter(|ch| d != Difficulty::Imago || on_our_side(w, colony, ch.cx, ch.cy))
             .min_by_key(|ch| (Pos::of_cell(ch.cx, ch.cy).dist2(home), ch.cx, ch.cy));
         if let Some(ch) = target {
+            if let (true, Some(sp)) = (rescout, scout_wp) {
+                let (x, y) = sp.cell();
+                out.push(Command::ClearWaypoint { x, y });
+            }
             out.push(Command::SetWaypoint {
                 species: Some(Species::Soldier),
                 x: ch.cx,
@@ -622,15 +861,85 @@ pub fn decide(w: &World, colony: u8, d: Difficulty) -> Vec<Command> {
     out
 }
 
-/// The nearest free chamber with nodes, for a new queen.
-fn expansion_spot(w: &World, colony: u8, home: Pos) -> Option<(i32, i32)> {
+/// Places a queen blueprint for a new nest when the plan wants one. Returns
+/// true when one is wanted now but the stockpile cannot pay for it yet.
+fn try_new_nest(
+    w: &World,
+    colony: u8,
+    d: Difficulty,
+    home: Pos,
+    stock: &mut [i32; 3],
+    out: &mut Vec<Command>,
+) -> bool {
+    let p = plan(d);
+    let queens = w.queens(colony).count() as i32;
+    let pending = w
+        .structures
+        .iter()
+        .filter(|s| s.colony == colony && !s.complete && s.kind == StructureKind::Queen)
+        .count() as i32;
+    let have = queens - 1 + pending;
+    let hatcheries = w
+        .structures
+        .iter()
+        .filter(|s| {
+            s.colony == colony && s.complete && matches!(s.kind, StructureKind::Hatchery(_))
+        })
+        .count();
+    if d == Difficulty::Imago && hatcheries < 2 {
+        return false;
+    }
+    let nest_at = match d {
+        Difficulty::Imago => 1800 + have * 900,
+        _ => 1600,
+    };
+    if have >= p.nests || w.tick < nest_at || pending > 0 {
+        return false;
+    }
+    let Some((x, y)) = nest_spot(w, colony, home, d == Difficulty::Imago) else {
+        return false;
+    };
+    let cost = StructureKind::Queen.stats().cost;
+    if !(0..3).all(|i| stock[i] >= cost[i]) {
+        return true;
+    }
+    out.push(Command::Place {
+        kind: StructureKind::Queen,
+        x,
+        y,
+        x2: x,
+        y2: y,
+    });
+    for i in 0..3 {
+        stock[i] -= cost[i];
+    }
+    false
+}
+
+/// The nearest free chamber with nodes, for a new queen; with `food_first`,
+/// the nearest with a Crumb Pile when one is known.
+fn nest_spot(w: &World, colony: u8, home: Pos, food_first: bool) -> Option<(i32, i32)> {
+    if food_first {
+        if let Some(spot) = nest_spot_where(w, colony, home, |r| r == Resource::Food) {
+            return Some(spot);
+        }
+    }
+    nest_spot_where(w, colony, home, |_| true)
+}
+
+fn nest_spot_where(
+    w: &World,
+    colony: u8,
+    home: Pos,
+    wanted: impl Fn(Resource) -> bool,
+) -> Option<(i32, i32)> {
     let explored = w.team_explored(colony);
     let mut chambers: Vec<(i64, usize)> = w
         .map
         .chambers
         .iter()
         .enumerate()
-        .filter(|(_, c)| c.home.is_none())
+        .filter(|(_, c)| c.home.is_none() && on_our_side(w, colony, c.cx, c.cy))
         .map(|(i, c)| (Pos::of_cell(c.cx, c.cy).dist2(home), i))
         .collect();
     chambers.sort();
@@ -639,10 +948,11 @@ fn expansion_spot(w: &World, colony: u8, home: Pos) -> Option<(i32, i32)> {
         if !explored.get(w.map.idx(c.cx, c.cy)) {
             continue;
         }
-        let rich = w
-            .nodes
-            .iter()
-            .any(|n| n.amount > 0 && n.pos.dist(Pos::of_cell(c.cx, c.cy)) < (c.r + 4) * CELL);
+        let rich = w.nodes.iter().any(|n| {
+            n.amount > 400
+                && wanted(n.resource)
+                && n.pos.dist(Pos::of_cell(c.cx, c.cy)) < (c.r + 4) * CELL
+        });
         if !rich {
             continue;
         }
@@ -652,4 +962,46 @@ fn expansion_spot(w: &World, colony: u8, home: Pos) -> Option<(i32, i32)> {
         }
     }
     None
+}
+
+/// How many Harvester Ants the colony's nests can use: a full complement on
+/// every node, still worth gathering, near one of its queens.
+fn node_room(w: &World, colony: u8) -> i32 {
+    let explored = w.team_explored(colony);
+    let queens: Vec<Pos> = w.queens(colony).map(|q| q.pos).collect();
+    w.nodes
+        .iter()
+        .filter(|n| {
+            n.amount > 200
+                && {
+                    let (x, y) = n.pos.cell();
+                    explored.get(w.map.idx(x, y))
+                }
+                && queens.iter().any(|q| q.dist(n.pos) < 22 * CELL)
+        })
+        .map(|n| {
+            // Food is spent on everything, so its nodes get a full
+            // complement; Nectar feeds the Tier 2 army; Leaves need few.
+            match n.resource {
+                Resource::Food => crate::rules::SATURATION as i32,
+                Resource::Nectar => 5,
+                Resource::Leaves => 3,
+            }
+        })
+        .sum()
+}
+
+/// A cell nearer the colony's home chamber than any enemy's: every player
+/// knows where the home chambers are from the map's symmetry.
+fn on_our_side(w: &World, colony: u8, x: i32, y: i32) -> bool {
+    let p = Pos::of_cell(x, y);
+    let mine = w.map.home(colony as usize);
+    let d = p.dist2(Pos::of_cell(mine.cx, mine.cy));
+    w.colonies
+        .iter()
+        .filter(|c| !w.allied(c.seat, colony))
+        .all(|c| {
+            let h = w.map.home(c.seat as usize);
+            d <= p.dist2(Pos::of_cell(h.cx, h.cy))
+        })
 }
