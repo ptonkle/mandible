@@ -469,6 +469,21 @@ pub fn generate(seed: u64, settings: &MatchSettings) -> Map {
             cache: false,
         });
     }
+    // A second, smaller Crumb Pile: Food pays for almost everything, and one
+    // pile holds only 8 Harvester Ants (SECOND-ORDER row 35).
+    {
+        let a = (a0 + 53) % 64;
+        let d = home.r * 6 / 10;
+        rep_nodes.push(NodeSpot {
+            pos: Pos::new(
+                home.cx * CELL + CELL / 2 + d * CELL * cos64(a) / TRIG_ONE,
+                home.cy * CELL + CELL / 2 + d * CELL * sin64(a) / TRIG_ONE,
+            ),
+            resource: Resource::Food,
+            amount: 2400 * density / 100,
+            cache: false,
+        });
+    }
     for c in reps.iter().skip(1) {
         let count = if rng.chance(density as u32 / 2) { 2 } else { 1 };
         for _ in 0..count {

@@ -116,7 +116,7 @@ fn income_is_what_was_delivered_in_the_last_ten_seconds() {
 fn saturation_caps_gatherers_per_node() {
     let mut w = arena(3);
     let h = home(&w, 0);
-    for _ in 0..30 {
+    for _ in 0..40 {
         w.spawn_ant(0, Species::Harvester, h);
     }
     w.colonies[0].focus = Focus::Food;
@@ -128,10 +128,10 @@ fn saturation_caps_gatherers_per_node() {
             *per.entry(n).or_insert(0) += 1;
         }
     }
-    // Only the three home nodes are explored: 3 x 8 gatherers, 6 left idle.
+    // Only the four home nodes are explored: 4 x 8 gatherers, 8 left idle.
     assert_eq!(
         per.values().copied().collect::<Vec<i32>>(),
-        vec![8, 8, 8],
+        vec![8, 8, 8, 8],
         "{per:?}"
     );
 }
