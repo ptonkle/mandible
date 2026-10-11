@@ -110,6 +110,23 @@ export function createRenderer(canvas, assets) {
     tracePoints();
     ctx.stroke();
   };
+  handlers[assets.ops.text] = () => {
+    const x = next();
+    const y = next();
+    const size = next();
+    ctx.fillStyle = palette[next()];
+    ctx.strokeStyle = palette[next()];
+    ctx.lineWidth = next();
+    ctx.textAlign = assets.aligns[next()];
+    const count = next();
+    let text = "";
+    for (let k = 0; k < count; k += 1) {
+      text += String.fromCharCode(next());
+    }
+    ctx.font = `${assets.font.weight} ${size}px ${assets.font.family}`;
+    ctx.strokeText(text, x, y);
+    ctx.fillText(text, x, y);
+  };
 
   // Keeps an RGBA image from the core as an offscreen canvas, by id.
   function setImage(id, width, height, bytes) {
@@ -132,6 +149,7 @@ export function createRenderer(canvas, assets) {
     ctx.imageSmoothingQuality = "low";
     ctx.lineJoin = "round";
     ctx.lineCap = "round";
+    ctx.textBaseline = "middle";
     toBase();
     while (at < list.length) {
       handlers[next()]();

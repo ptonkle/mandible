@@ -29,9 +29,9 @@ use crate::dice::Rng;
 use crate::fixed::{cos64, isqrt, sin64, Pos, CELL, STEPS, TRIG_ONE};
 use crate::fog::Bits;
 use crate::map::Ground;
-use crate::rules::{Resource, Species, StructureKind};
+use crate::rules::{Resource, Species, StructureKind, SATURATION};
 use crate::settings::Biome;
-use crate::world::{EffectKind, Structure, World};
+use crate::world::{EffectKind, Job, Structure, World};
 
 /// Draw-list units per screen pixel.
 pub const SUB_PX: i32 = 16;
@@ -55,6 +55,8 @@ const DETAIL_ZOOM: i32 = 96;
 const OUTLINE_ZOOM: i32 = 64;
 /// From this zoom ants carry their dark role mark.
 const MARK_ZOOM: i32 = 96;
+/// From this zoom (5 pixels per cell) nodes show their Saturation.
+const SATURATION_ZOOM: i32 = 80;
 
 /// Op codes of the draw list and their argument layouts. Coordinates and
 /// widths are draw-list units; colours are palette indices.
@@ -76,8 +78,14 @@ pub mod op {
     pub const OUTLINE: i32 = 5;
     /// `LINE stroke width n x1 y1 …`: a stroked open polyline.
     pub const LINE: i32 = 6;
+    /// `TEXT x y size fill stroke width align n c1 … cn`: a line of text,
+    /// its characters as Unicode code points, drawn in the assets' font at
+    /// `size` draw-list units, outlined in `stroke` (`width` draw-list
+    /// units, half of it hidden under the fill) and filled in `fill`. `y` is
+    /// the middle of the line; `align` indexes the assets' `aligns`.
+    pub const TEXT: i32 = 7;
 
-    pub const NAMES: [(&str, i32); 7] = [
+    pub const NAMES: [(&str, i32); 8] = [
         ("clear", CLEAR),
         ("image", IMAGE),
         ("shape", SHAPE),
@@ -85,21 +93,33 @@ pub mod op {
         ("poly", POLY),
         ("outline", OUTLINE),
         ("line", LINE),
+        ("text", TEXT),
     ];
 
-    /// Arguments before the point list, and whether a point list follows
-    /// (its count is the last fixed argument).
-    pub fn layout(code: i32) -> Option<(usize, bool)> {
+    /// Arguments before the list, and how many numbers each list item takes
+    /// (2 for a point, 1 for a character, 0 when no list follows; the item
+    /// count is the last fixed argument).
+    pub fn layout(code: i32) -> Option<(usize, usize)> {
         match code {
-            CLEAR => Some((1, false)),
-            IMAGE => Some((9, false)),
-            SHAPE => Some((7, false)),
-            FILL_SHAPE => Some((5, false)),
-            POLY => Some((2, true)),
-            OUTLINE | LINE => Some((3, true)),
+            CLEAR => Some((1, 0)),
+            IMAGE => Some((9, 0)),
+            SHAPE => Some((7, 0)),
+            FILL_SHAPE => Some((5, 0)),
+            POLY => Some((2, 2)),
+            OUTLINE | LINE => Some((3, 2)),
+            TEXT => Some((8, 1)),
             _ => None,
         }
     }
+
+    /// Text alignments, indexed by `TEXT`'s `align`.
+    pub const ALIGNS: [&str; 3] = ["left", "center", "right"];
+    pub const ALIGN_LEFT: i32 = 0;
+    pub const ALIGN_CENTRE: i32 = 1;
+    pub const ALIGN_RIGHT: i32 = 2;
+    /// The font `TEXT` uses: CSS weight and family.
+    pub const FONT_WEIGHT: &str = "bold";
+    pub const FONT_FAMILY: &str = "system-ui, sans-serif";
 }
 
 /// Image ids the page keeps its offscreen canvases under.
@@ -914,6 +934,8 @@ pub fn assets_json() -> String {
         "images": {"terrain": IMAGE_TERRAIN, "fog": IMAGE_FOG, "minimap": IMAGE_MINIMAP},
         "palette": PALETTE,
         "shapes": shape_list,
+        "aligns": op::ALIGNS,
+        "font": {"weight": op::FONT_WEIGHT, "family": op::FONT_FAMILY},
     });
     let mut text = v.to_string();
     text.pop();
@@ -1014,6 +1036,9 @@ struct Texture {
     blot: Vec<i32>,
     wobble: Vec<i32>,
     flowers: Vec<(i32, i32, usize, bool, usize)>,
+    /// Pebbles and river stones: jitter x, jitter y (percent), radius
+    /// (percent), tone, and a 0..100 roll for whether one is there.
+    pebbles: Vec<(i32, i32, i32, i32, i32)>,
 }
 
 const GRAIN: i32 = 64;
@@ -1037,11 +1062,23 @@ impl Texture {
                 )
             })
             .collect();
+        let pebbles = (0..FLOWERS * FLOWERS)
+            .map(|_| {
+                (
+                    rng.range(-20, 20),
+                    rng.range(-20, 20),
+                    rng.range(10, 20),
+                    rng.range(-16, 16),
+                    rng.range(0, 99),
+                )
+            })
+            .collect();
         Texture {
             grain,
             blot,
             wobble,
             flowers,
+            pebbles,
         }
     }
 
@@ -1146,16 +1183,60 @@ struct Painter<'a> {
 
 impl Painter<'_> {
     fn floor(&self, px: i32, py: i32, shade: i32) -> [i32; 3] {
-        let base = match self.biome {
-            Biome::FlowerField => [144, 108, 70],
-            _ => [122, 92, 62],
-        };
         let lat = 256 * 2 / self.scale.max(1);
         let b = self.tex.blot(px * lat / 4, py * lat / 4) * 14 / 128;
         let g = self.tex.grain(px, py) * 9 / 128;
-        let c = add(base, b + g);
+        let c = match self.biome {
+            Biome::FlowerField => add([144, 108, 70], b + g),
+            Biome::ForestFloor => self.litter(px, py, b + g),
+            Biome::Riverbank => self.silt(px, py, b + g),
+            _ => add([122, 92, 62], b + g),
+        };
         let f = 256 - shade * 120 / 256;
         [c[0] * f / 256, c[1] * f / 256, c[2] * f / 256]
+    }
+
+    /// Forest Floor ground: dark loam under faint leaf litter and pine
+    /// needles, kept low in contrast so ants and nodes stand out on it.
+    fn litter(&self, px: i32, py: i32, wobble: i32) -> [i32; 3] {
+        let lat = 256 * 2 / self.scale.max(1);
+        let mut c = add([104, 80, 54], wobble);
+        let leaf = self.tex.blot(px * lat + 7000, py * lat + 7000);
+        if leaf > 40 {
+            c = mix(c, [132, 88, 48], (leaf - 40) * 2);
+        }
+        // Needles: grain stretched along both diagonals into short strokes.
+        let (u, v) = (px + py, px - py);
+        if self.tex.grain(u, v / 7) > 116 || self.tex.grain(v + 29, u / 7) > 118 {
+            c = mix(c, [150, 112, 64], 150);
+        }
+        c
+    }
+
+    /// Riverbank ground: grey-brown silt with darker damp patches and a
+    /// scatter of tiny pebbles.
+    fn silt(&self, px: i32, py: i32, wobble: i32) -> [i32; 3] {
+        let lat = 256 * 2 / self.scale.max(1);
+        let mut c = add([134, 122, 98], wobble);
+        let damp = self.tex.blot(px * lat / 3 + 3000, py * lat / 3 + 3000);
+        if damp > 30 {
+            c = mix(c, [102, 96, 82], (damp - 30) * 2);
+        }
+        // Pebbles on a jittered lattice two thirds of a cell apart.
+        let l = (self.scale * SUB_PX * 2 / 3).max(SUB_PX);
+        let (x, y) = (px * SUB_PX + SUB_PX / 2, py * SUB_PX + SUB_PX / 2);
+        let (lx, ly) = (x.div_euclid(l), y.div_euclid(l));
+        let p =
+            self.tex.pebbles[(ly.rem_euclid(FLOWERS) * FLOWERS + lx.rem_euclid(FLOWERS)) as usize];
+        if p.4 < 30 {
+            let (cx, cy) = (l / 2 + p.0 * l / 100, l / 2 + p.1 * l / 100);
+            let (dx, dy) = (x.rem_euclid(l) - cx, y.rem_euclid(l) - cy);
+            let r = l * p.2 / 100;
+            if dx * dx + dy * dy * 3 / 2 < r * r {
+                return add([150, 144, 134], p.3 - 20);
+            }
+        }
+        c
     }
 
     fn dirt(&self, px: i32, py: i32) -> [i32; 3] {
@@ -1175,8 +1256,66 @@ impl Painter<'_> {
     fn rock(&self, px: i32, py: i32, depth: i32) -> [i32; 3] {
         match self.biome {
             Biome::FlowerField => self.bush(px, py, depth),
+            Biome::ForestFloor => self.bark(px, py, depth),
+            Biome::Riverbank => self.water(px, py, depth),
             _ => self.blanket(px, py, depth),
         }
+    }
+
+    /// Forest Floor rock: tree roots and bark, ridged along a wandering
+    /// grain and patched with moss, with a mossy edge.
+    fn bark(&self, px: i32, py: i32, depth: i32) -> [i32; 3] {
+        let lat = 256 * 2 / self.scale.max(1);
+        let g = self.tex.grain(px, py);
+        if depth < 44 {
+            let tuft = self.tex.grain(px * 2, py / 2 + 11);
+            return add([70, 104, 46], tuft * 18 / 128 + g * 6 / 128);
+        }
+        let bend = self.tex.blot(px * lat / 6 + 1500, py * lat / 6 + 1500);
+        let period = (self.scale * 3 / 2).max(4);
+        let t = px + py * 2 + bend * self.scale / 40;
+        let mut c = if t.rem_euclid(period) * 4 < period {
+            [38, 28, 22]
+        } else {
+            add([60, 46, 36], g * 6 / 128)
+        };
+        let moss = self.tex.blot(px * lat / 2 + 5000, py * lat / 2 + 5000);
+        if moss > 56 {
+            c = mix(c, add([66, 96, 40], g * 10 / 128), (moss - 56) * 4);
+        }
+        c
+    }
+
+    /// Riverbank rock: the stream, deep and rippled, edged with river
+    /// stones.
+    fn water(&self, px: i32, py: i32, depth: i32) -> [i32; 3] {
+        let lat = 256 * 2 / self.scale.max(1);
+        if depth < 80 {
+            let l = (self.scale * SUB_PX).max(SUB_PX);
+            let (x, y) = (px * SUB_PX + SUB_PX / 2, py * SUB_PX + SUB_PX / 2);
+            let (lx, ly) = (x.div_euclid(l), y.div_euclid(l));
+            let p = self.tex.pebbles
+                [(ly.rem_euclid(FLOWERS) * FLOWERS + lx.rem_euclid(FLOWERS)) as usize];
+            let (cx, cy) = (l / 2 + p.0 * l / 200, l / 2 + p.1 * l / 200);
+            let (dx, dy) = (x.rem_euclid(l) - cx, y.rem_euclid(l) - cy);
+            let r = l * 46 / 100;
+            let d2 = dx * dx + dy * dy;
+            if d2 < r * r {
+                // A rounded stone, lit from the upper left.
+                let lit = (-(dx + dy) * 24 / r.max(1)).clamp(-24, 24);
+                return add([128, 124, 116], p.3 + lit - d2 * 30 / (r * r));
+            }
+            return [60, 66, 60];
+        }
+        let b = self.tex.blot(px * lat / 3 + 2200, py * lat / 3 + 2200);
+        let mut c = add([46, 98, 112], b * 14 / 128);
+        // Ripples: thin bright bands across the current.
+        let band = py * 3 + px + b * self.scale / 10;
+        let period = (self.scale * 3).max(6);
+        if band.rem_euclid(period) == 0 && self.tex.grain(px / 4, py / 2) > 0 {
+            c = mix(c, [150, 196, 204], 110);
+        }
+        c
     }
 
     /// Picnic rock: a gingham picnic blanket, edged with grass.
@@ -1204,7 +1343,7 @@ impl Painter<'_> {
         let lat = 256 * 2 / self.scale.max(1);
         let b = self.tex.blot(px * lat / 2 + 900, py * lat / 2 + 900);
         let g = self.tex.grain(px, py);
-        let mut c = add([44, 94, 40], b * 22 / 128 + g * 10 / 128);
+        let mut c = add([38, 88, 34], b * 22 / 128 + g * 10 / 128);
         if depth < 40 {
             c = mix([30, 60, 28], c, depth * 6);
         }
@@ -1284,11 +1423,11 @@ pub fn terrain_region(
         for (k, px) in (px0..px1).enumerate() {
             let (ix, fx) = cols[k];
             let s = f.sample(&f.solid, ix, iy, fx, fy);
-            let shade = f.sample(&f.shade, ix, iy, fx, fy);
-            let floor = paint.floor(px, py, shade);
             let alpha = ((s - 128) * 256 / (per_px * 2) + 128).clamp(0, 256);
+            // Floor only where some of it shows.
+            let floor = || paint.floor(px, py, f.sample(&f.shade, ix, iy, fx, fy));
             let c = if alpha == 0 {
-                floor
+                floor()
             } else {
                 let depth = s - 128;
                 let d = f.sample(&f.dirt, ix, iy, fx, fy);
@@ -1307,7 +1446,11 @@ pub fn terrain_region(
                 let edge = if d > 128 { [70, 44, 24] } else { [34, 30, 20] };
                 let line = (256 - (depth - per_px) * 256 / per_px.max(1)).clamp(0, 256);
                 let solid = mix(solid, edge, line * 3 / 4);
-                mix(floor, solid, alpha)
+                if alpha == 256 {
+                    solid
+                } else {
+                    mix(floor(), solid, alpha)
+                }
             };
             out[o] = c[0].clamp(0, 255) as u8;
             out[o + 1] = c[1].clamp(0, 255) as u8;
@@ -1316,8 +1459,12 @@ pub fn terrain_region(
             o += 4;
         }
     }
+    props::paint(world, paint.biome, scale, (px0, py0, pw, ph), &mut out);
     (pw, ph, out)
 }
+
+#[path = "render_props.rs"]
+mod props;
 
 // ---- fog ----
 
@@ -1628,6 +1775,24 @@ impl List<'_> {
         self.out.extend_from_slice(&[op::LINE, stroke, width]);
         self.points(pts);
     }
+
+    /// One line of text at `at` (aligned by `align`, `at.1` its middle),
+    /// `size` draw-list units tall, in `ink.0` outlined in `ink.1` `ink.2`
+    /// wide.
+    fn text(&mut self, at: Pt, size: i32, ink: (i32, i32, i32), align: i32, s: &str) {
+        self.out.extend_from_slice(&[
+            op::TEXT,
+            at.0,
+            at.1,
+            size.max(1),
+            ink.0,
+            ink.1,
+            ink.2.max(1),
+            align,
+            s.chars().count() as i32,
+        ]);
+        self.out.extend(s.chars().map(|c| c as i32));
+    }
 }
 
 /// Line width in draw-list units for outlines: thinner when zoomed out.
@@ -1732,6 +1897,40 @@ fn draw_structure(list: &mut List, sight: &Sight, world: &World, s: &Structure) 
         delivery_rim(list, body, (x, y), r, paid(s), s.colony);
         icon(list, s.kind, x, y, cam.shape_scale(), soft(s.colony));
     }
+}
+
+/// Gatherers working each node (`Job::Gather`), by node index: counted
+/// the way `ants.rs` counts a node's load for Saturation, every colony's
+/// ants together.
+fn gatherers(world: &World) -> Vec<i32> {
+    let mut load = vec![0; world.nodes.len()];
+    for a in &world.ants {
+        if let Job::Gather(id) = a.job {
+            if let Some(i) = world.node_index(id) {
+                load[i] += 1;
+            }
+        }
+    }
+    load
+}
+
+/// A node's Saturation, "gatherers/SATURATION", over the node: white, or
+/// gold once Saturated, outlined in ink so it reads on every biome.
+fn draw_saturation(list: &mut List, n: &crate::world::Node, working: i32) {
+    let cam = list.cam;
+    let (x, y) = cam.screen(n.pos);
+    let size = cam.length(CELL * 9 / 10).clamp(SUB_PX * 12, SUB_PX * 16);
+    let lift = cam.length(CELL * 13 / 10) + size / 2;
+    let full = working >= SATURATION as i32;
+    let fill = if full { C_HILL } else { C_HOVER };
+    let text = format!("{working}/{SATURATION}");
+    list.text(
+        (x, y - lift),
+        size,
+        (fill, C_INK, size / 4),
+        op::ALIGN_CENTRE,
+        &text,
+    );
 }
 
 fn draw_node(list: &mut List, sight: &Sight, n: &crate::world::Node) {
@@ -2089,6 +2288,18 @@ pub fn frame(
         list.outline(C_HILL, SUB_PX * 3, ring);
     }
 
+    // Saturation over every node the viewer's team sees now, above the
+    // ants and Fog of War; from `SATURATION_ZOOM`, and counted only then.
+    if z >= SATURATION_ZOOM {
+        let load = gatherers(world);
+        for (n, &working) in world.nodes.iter().zip(&load) {
+            let (x, y) = cam.screen(n.pos);
+            if n.amount > 0 && list.on_screen(x, y, z * 3) && sight.sees(n.pos) {
+                draw_saturation(&mut list, n, working);
+            }
+        }
+    }
+
     if let Some(v) = viewer.filter(|v| (*v as usize) < world.colonies.len()) {
         draw_waypoints(&mut list, world, v, overlay.hover_waypoint);
     }
@@ -2234,7 +2445,12 @@ pub fn minimap(world: &World, viewer: Option<u8>, cam: &Camera, size: i32) -> Ve
             out[i + 3] = 255;
         }
     };
-    let flower = biome_of(world) == Biome::FlowerField;
+    let rock = match biome_of(world) {
+        Biome::FlowerField => [50, 92, 42],
+        Biome::ForestFloor => [62, 50, 40],
+        Biome::Riverbank => [52, 102, 116],
+        _ => [176, 110, 104],
+    };
     for py in 0..size {
         for px in 0..size {
             let cx = (px - ox) * m / size;
@@ -2246,8 +2462,7 @@ pub fn minimap(world: &World, viewer: Option<u8>, cam: &Camera, size: i32) -> Ve
                 let base = match world.map.ground[i] {
                     Ground::Floor => [150, 114, 78],
                     Ground::Dirt => [206, 154, 88],
-                    Ground::Rock if flower => [50, 92, 42],
-                    Ground::Rock => [176, 110, 104],
+                    Ground::Rock => rock,
                 };
                 if sight.all || sight.visible.get(i) {
                     base
@@ -2439,21 +2654,7 @@ pub fn icon_list(key: &str, colony: u8, size: i32) -> Option<Vec<i32>> {
     let colour = player(colony);
     // Shapes fill 84% of the icon, leaving room for the outline.
     let side = full * 84 / 100;
-    let ant = |list: &mut List, s: Species| {
-        let mut both = ant_shape(s, UP, true);
-        both.extend(mark_shape(s, UP));
-        let (p, scale) = fit_box(bounds(&both), (c, c), side);
-        list.shape(
-            ant_shape_id(s, UP, true),
-            p.0,
-            p.1,
-            scale,
-            colour,
-            C_INK,
-            24,
-        );
-        list.fill_shape(mark_shape_id(s, UP), p.0, p.1, scale, C_INK);
-    };
+    let ant = |list: &mut List, s: Species| fitted_ant(list, s, (c, c), side, colour);
     let body = |list: &mut List, kind: StructureKind| {
         let rr = full * 9 / 20;
         let pts: Vec<Pt> = body_unit(body_of(kind))
@@ -2484,9 +2685,27 @@ pub fn icon_list(key: &str, colony: u8, size: i32) -> Option<Vec<i32>> {
         ant(&mut list, s);
         return Some(list.out);
     }
-    if let Some(rest) = key.strip_prefix("upgrade.species.") {
-        let s = Species::from_key(rest)?;
-        ant(&mut list, s);
+    if let Some(rest) = key.strip_prefix("upgrade.") {
+        // "upgrade.<key>", or "upgrade.<key>@<rank>" to print the rank.
+        let (name, rank) = match rest.split_once('@') {
+            Some((name, r)) => (
+                name,
+                Some(r.parse::<i32>().ok().filter(|r| (1..=3).contains(r))?),
+            ),
+            None => (rest, None),
+        };
+        upgrade_icon(&mut list, name, colony, full)?;
+        if let Some(r) = rank {
+            let numeral = ["I", "II", "III"][r as usize - 1];
+            let size = full * 3 / 10;
+            list.text(
+                (full * 19 / 20, full - size / 2 - full / 40),
+                size,
+                (C_HOVER, C_INK, size / 3),
+                op::ALIGN_RIGHT,
+                numeral,
+            );
+        }
         return Some(list.out);
     }
     if let Some(rest) = key.strip_prefix("structure.") {
@@ -2498,12 +2717,6 @@ pub fn icon_list(key: &str, colony: u8, size: i32) -> Option<Vec<i32>> {
     }
     let nectar = Some((SH_POLLEN, C_POLLEN));
     let s = match key {
-        "upgrade.damage" => Species::TrapJaw,
-        "upgrade.armor" => Species::Turtle,
-        "upgrade.health" => Species::Nurse,
-        "upgrade.gather_rate" => Species::Harvester,
-        "upgrade.carry_capacity" => Species::Leafcutter,
-        "upgrade.build_rate" => Species::Carpenter,
         "action.all_ants" => Species::Soldier,
         "action.evolve" => {
             // The queen with an arrow up: on to the next tier.
@@ -2601,6 +2814,194 @@ pub fn icon_list(key: &str, colony: u8, size: i32) -> Option<Vec<i32>> {
     };
     ant(&mut list, s);
     Some(list.out)
+}
+
+/// A species' detailed shape with its mark, fitted into a square of `side`
+/// centred on `at`, in `fill` with a dark outline.
+fn fitted_ant(list: &mut List, s: Species, at: Pt, side: i32, fill: i32) {
+    let mut both = ant_shape(s, UP, true);
+    both.extend(mark_shape(s, UP));
+    let (p, scale) = fit_box(bounds(&both), at, side);
+    list.shape(ant_shape_id(s, UP, true), p.0, p.1, scale, fill, C_INK, 24);
+    list.fill_shape(mark_shape_id(s, UP), p.0, p.1, scale, C_INK);
+}
+
+/// A filled shape with a dark outline `w` wide.
+fn inked(list: &mut List, fill: i32, w: i32, pts: &[Pt]) {
+    list.poly(fill, pts);
+    list.outline(C_INK, w, pts);
+}
+
+/// A heart, `h` tall, centred on (cx, cy).
+fn heart(cx: i32, cy: i32, h: i32) -> Vec<Pt> {
+    let t = TRIG_ONE as i64;
+    (0..STEPS)
+        .map(|k| {
+            let (s, c) = (sin64(k) as i64, cos64(k) as i64);
+            let c2 = cos64(2 * k % STEPS) as i64;
+            let c3 = cos64(3 * k % STEPS) as i64;
+            let c4 = cos64(4 * k % STEPS) as i64;
+            // The classic curve: x = 16 sin³t, y = -(13 cos t - 5 cos 2t -
+            // 2 cos 3t - cos 4t), about 34 units tall.
+            let x = 16 * s * s / t * s / t;
+            let y = -(13 * c - 5 * c2 - 2 * c3 - c4) - 3 * t;
+            (
+                cx + (x * h as i64 / (34 * t)) as i32,
+                cy + (y * h as i64 / (34 * t)) as i32,
+            )
+        })
+        .collect()
+}
+
+/// An upgrade's icon (TRIAGE row 53): a dark disc with a gold rim, so the
+/// upgrades read as one family apart from species and structures, carrying
+/// a stat glyph (a sword for Damage, a shield for Armor, a heart for
+/// Health, a crumb with speed lines for Gather Rate, a crumb and a leaf
+/// under an up arrow for Carry Capacity, a hammer for Build Rate) or, for a
+/// species upgrade, the species under a gold double chevron. `None` for an
+/// unknown upgrade key.
+fn upgrade_icon(list: &mut List, name: &str, colony: u8, full: i32) -> Option<()> {
+    let colour = player(colony);
+    let c = full / 2;
+    let w = full / 24;
+    let at = |x: i32, y: i32| (full * x / 100, full * y / 100);
+    let disc = circle(c, c, full * 45 / 100, 32);
+    list.poly(C_BASE, &disc);
+    list.outline(C_POLLEN, full / 20, &disc);
+    let item = |list: &mut List, shape: Shape, id: i32, centre: Pt, side: i32, fill: i32| {
+        let (p, scale) = fit_box(bounds(&shape), centre, side);
+        list.shape(id, p.0, p.1, scale, fill, C_INK, 24);
+    };
+    if let Some(rest) = name.strip_prefix("species.") {
+        let s = Species::from_key(rest)?;
+        fitted_ant(list, s, at(46, 56), full * 56 / 100, colour);
+        for k in 0..2 {
+            let y = full * (14 + 12 * k) / 100;
+            let v = [
+                at(64, 0),
+                at(78, 0),
+                at(92, 0),
+                at(92, 0),
+                at(78, 0),
+                at(64, 0),
+            ];
+            let pts: Vec<Pt> = v
+                .iter()
+                .enumerate()
+                .map(|(i, p)| {
+                    let dy = [10, -2, 10, 17, 5, 17][i];
+                    (p.0, y + full * dy / 100)
+                })
+                .collect();
+            inked(list, C_POLLEN, w, &pts);
+        }
+        return Some(());
+    }
+    match name {
+        "damage" => {
+            // A sword, point up and to the right.
+            let (tip, guard) = (at(80, 20), at(38, 62));
+            let u = unit(guard, tip);
+            let v = (-u.1, u.0);
+            let (half, neck) = (full * 7 / 100, full * 44 / 100);
+            let blade = [
+                along(guard, u, 0, v, -half),
+                along(guard, u, neck, v, -half),
+                tip,
+                along(guard, u, neck, v, half),
+                along(guard, u, 0, v, half),
+            ];
+            inked(list, colour, w, &blade);
+            let grip = bar(
+                guard,
+                along(guard, u, -full * 20 / 100, v, 0),
+                full * 9 / 100,
+            );
+            inked(list, C_FLOOR, w, &grip);
+            let cross = bar(
+                along(guard, u, 0, v, -full * 17 / 100),
+                along(guard, u, 0, v, full * 17 / 100),
+                full * 9 / 100,
+            );
+            inked(list, colour, w, &cross);
+            let pommel = along(guard, u, -full * 23 / 100, v, 0);
+            inked(list, colour, w, &circle(pommel.0, pommel.1, full / 15, 12));
+        }
+        "armor" => {
+            let shield = [
+                at(24, 20),
+                at(50, 14),
+                at(76, 20),
+                at(76, 48),
+                at(71, 63),
+                at(61, 75),
+                at(50, 84),
+                at(39, 75),
+                at(29, 63),
+                at(24, 48),
+            ];
+            inked(list, colour, w, &shield);
+            let band = [at(44, 17), at(56, 17), at(56, 80), at(50, 84), at(44, 80)];
+            list.poly(C_INK, &band);
+            list.poly(C_INK, &[at(24, 40), at(76, 40), at(76, 50), at(24, 50)]);
+        }
+        "health" => {
+            inked(list, colour, w, &heart(c, full * 53 / 100, full * 60 / 100));
+            list.poly(C_HOVER, &plus(c, full * 47 / 100, full / 7, full / 14));
+        }
+        "gather_rate" => {
+            item(
+                list,
+                crumbs_shape(),
+                SH_CRUMBS,
+                at(60, 50),
+                full * 46 / 100,
+                C_CRUMB,
+            );
+            for (y, x0) in [(36, 16), (50, 10), (64, 16)] {
+                let line = [at(x0, y), at(34, y)];
+                list.line(C_INK, full / 9, &line);
+                list.line(colour, full / 18, &line);
+            }
+        }
+        "carry_capacity" => {
+            item(
+                list,
+                leaves_shape(),
+                SH_LEAVES,
+                at(62, 64),
+                full * 36 / 100,
+                C_LEAF,
+            );
+            item(
+                list,
+                crumbs_shape(),
+                SH_CRUMBS,
+                at(38, 64),
+                full * 34 / 100,
+                C_CRUMB,
+            );
+            let a = arrow(at(50, 46), at(50, 10), full / 8, full / 4);
+            inked(list, colour, w, &a);
+        }
+        "build_rate" => {
+            // A hammer, handle down to the left.
+            let (top, end) = (at(62, 36), at(28, 80));
+            let u = unit(end, top);
+            let v = (-u.1, u.0);
+            let handle = bar(end, top, full / 9);
+            inked(list, C_FLOOR, w, &handle);
+            let head = [
+                along(top, u, -full / 12, v, -full * 24 / 100),
+                along(top, u, -full / 12, v, full * 20 / 100),
+                along(top, u, full / 9, v, full * 20 / 100),
+                along(top, u, full / 9, v, -full * 24 / 100),
+            ];
+            inked(list, colour, w, &head);
+        }
+        _ => return None,
+    }
+    Some(())
 }
 
 #[cfg(test)]

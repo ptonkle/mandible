@@ -21,11 +21,11 @@ fn decode(list: &[i32]) -> Vec<(i32, Vec<i32>)> {
     let mut i = 0;
     while i < list.len() {
         let code = list[i];
-        let (fixed, points) =
+        let (fixed, per_item) =
             op::layout(code).unwrap_or_else(|| panic!("unknown op {code} at {i}"));
         let mut n = fixed;
-        if points {
-            n += 2 * list[i + fixed] as usize;
+        if per_item > 0 {
+            n += per_item * list[i + fixed] as usize;
         }
         assert!(
             i + 1 + n <= list.len(),
@@ -135,6 +135,11 @@ fn draw_list_names_only_known_ops() {
                     op::FILL_SHAPE => {
                         assert!(a[0] < shapes && a[4] < palette);
                         assert!(a[3] > 0 && a[3] <= SCALE_MAX);
+                    }
+                    op::TEXT => {
+                        assert!(a[2] > 0 && a[3] < palette && a[4] < palette && a[5] > 0);
+                        assert!((a[6] as usize) < op::ALIGNS.len());
+                        assert!(a[8..].iter().all(|c| char::from_u32(*c as u32).is_some()));
                     }
                     _ => unreachable!(),
                 }
@@ -423,7 +428,7 @@ fn mean_colour(w: &World, img: &[u8], scale: i32, g: Ground) -> [i64; 3] {
 }
 
 #[test]
-fn rock_dirt_and_floor_look_different_in_both_biomes() {
+fn rock_dirt_and_floor_look_different_in_every_biome() {
     // A map with a dirt plug at least three cells thick.
     let mut w = (1..40)
         .map(|seed| World::new(seed, MatchSettings::default(), &[SeatKind::Human; 2]))
@@ -435,7 +440,7 @@ fn rock_dirt_and_floor_look_different_in_both_biomes() {
             })
         })
         .expect("some seed has dirt");
-    for biome in [Biome::Picnic, Biome::FlowerField] {
+    for biome in Biome::ALL {
         w.settings.biome = biome;
         let (_, _, img) = terrain_image(&w, 4);
         let floor = mean_colour(&w, &img, 4, Ground::Floor);
@@ -446,6 +451,136 @@ fn rock_dirt_and_floor_look_different_in_both_biomes() {
         assert!(far(floor, dirt), "{biome:?} floor {floor:?} dirt {dirt:?}");
         assert!(far(rock, dirt), "{biome:?} rock {rock:?} dirt {dirt:?}");
     }
+}
+
+/// A palette colour as RGB.
+fn rgb(colour: i32) -> [i64; 3] {
+    let hex = PALETTE[colour as usize].trim_start_matches('#');
+    let at = |k: usize| i64::from_str_radix(&hex[k..k + 2], 16).expect("hex colour");
+    [at(0), at(2), at(4)]
+}
+
+#[test]
+fn player_and_node_colours_stand_out_on_every_floor() {
+    // Ants and nodes stand on floor: every player colour and every node
+    // colour must be far from each biome's floor (TRIAGE row 44).
+    let mut w = world(Format::OneVOne);
+    let colours: Vec<(String, [i64; 3])> = PLAYER_RGB
+        .iter()
+        .enumerate()
+        .map(|(i, c)| (format!("player {i}"), c.map(|v| v as i64)))
+        .chain([
+            ("Food".to_string(), rgb(C_CRUMB)),
+            ("Nectar".to_string(), rgb(C_PETAL)),
+            ("Leaves".to_string(), rgb(C_LEAF)),
+        ])
+        .collect();
+    for biome in Biome::ALL {
+        w.settings.biome = biome;
+        let (_, _, img) = terrain_image(&w, 4);
+        let floor = mean_colour(&w, &img, 4, Ground::Floor);
+        for (name, c) in &colours {
+            let d: i64 = (0..3).map(|k| (c[k] - floor[k]).abs()).sum();
+            assert!(d >= 110, "{name} {c:?} on {biome:?} floor {floor:?}: {d}");
+        }
+    }
+}
+
+#[test]
+fn props_lie_deep_in_rock_and_come_from_the_seed() {
+    // TRIAGE rows 44 and 58: props only where nobody walks, the same for
+    // the same seed, varied in kind, size and turn.
+    let w = world(Format::OneVOne);
+    for biome in Biome::ALL {
+        let all = props::props(&w, biome);
+        assert!(all.len() >= 20, "{biome:?} has {} props", all.len());
+        assert_eq!(all, props::props(&w, biome), "{biome:?} is deterministic");
+        let fine = CELL;
+        for p in &all {
+            // Every cell the prop can paint (shadow included) touches is
+            // rock.
+            let reach = p.r * 11 / 8 + fine / 8 + fine;
+            for cy in (p.y - reach) / fine..=(p.y + reach) / fine {
+                for cx in (p.x - reach) / fine..=(p.x + reach) / fine {
+                    let (dx, dy) = (cx * fine + fine / 2 - p.x, cy * fine + fine / 2 - p.y);
+                    if dx * dx + dy * dy <= reach * reach {
+                        assert_eq!(w.map.at(cx, cy), Ground::Rock, "{biome:?} {p:?}");
+                    }
+                }
+            }
+        }
+        let mut kinds: Vec<String> = all.iter().map(|p| format!("{:?}", p.kind)).collect();
+        kinds.sort();
+        kinds.dedup();
+        assert!(kinds.len() >= 4, "{biome:?} kinds {kinds:?}");
+        let sizes: std::collections::BTreeSet<i32> = all.iter().map(|p| p.r).collect();
+        let turns: std::collections::BTreeSet<usize> = all.iter().map(|p| p.rot).collect();
+        assert!(sizes.len() >= 4 && turns.len() >= 8, "{biome:?} varies");
+    }
+    let picnic = props::props(&w, Biome::Picnic);
+    let mut food: Vec<String> = picnic.iter().map(|p| format!("{:?}", p.kind)).collect();
+    food.sort();
+    food.dedup();
+    assert_eq!(food.len(), 8, "every picnic prop appears: {food:?}");
+    let other = World::new(8, w.settings.clone(), &[SeatKind::Human; 2]);
+    assert_ne!(picnic, props::props(&other, Biome::Picnic), "another seed");
+}
+
+#[test]
+fn nodes_show_saturation_where_the_team_sees() {
+    // TRIAGE row 42: "working/SATURATION" over each node the viewer's team
+    // sees, counting every ant whose job is to gather there.
+    let mut w = world(Format::OneVOne);
+    w.step(&[], &[]);
+    let q = w.structures[queen_of(&w, 0)].pos;
+    let node = w
+        .nodes
+        .iter()
+        .min_by_key(|n| n.pos.dist2(q))
+        .expect("a node")
+        .clone();
+    for a in w.ants.iter_mut() {
+        a.job = Job::Idle;
+    }
+    for a in w.ants.iter_mut().take(3) {
+        a.job = Job::Gather(node.id);
+    }
+    let texts = |w: &World, viewer: Option<u8>, at: Pos, zoom: usize| -> Vec<(Pt, String)> {
+        decode(&frame(
+            w,
+            viewer,
+            &camera_on(at, zoom),
+            &Overlay::default(),
+            0,
+        ))
+        .into_iter()
+        .filter(|(code, _)| *code == op::TEXT)
+        .map(|(_, a)| {
+            let s: String = a[8..]
+                .iter()
+                .map(|c| char::from_u32(*c as u32).unwrap())
+                .collect();
+            ((a[0], a[1]), s)
+        })
+        .collect()
+    };
+    let cam = camera_on(q, 10);
+    let (nx, ny) = cam.screen(node.pos);
+    let shown = texts(&w, Some(0), q, 10);
+    let over = shown
+        .iter()
+        .find(|(p, _)| p.0 == nx && p.1 < ny)
+        .unwrap_or_else(|| panic!("no Saturation over the home node: {shown:?}"));
+    assert_eq!(over.1, format!("3/{SATURATION}"));
+    for (_, s) in &shown {
+        assert!(s.ends_with(&format!("/{SATURATION}")), "{s}");
+    }
+    // Hidden when zoomed far out.
+    assert!(texts(&w, Some(0), q, 5).is_empty(), "zoomed out");
+    // Not over the enemy's nodes, which colony 0 cannot see.
+    let e = w.structures[queen_of(&w, 1)].pos;
+    assert!(texts(&w, Some(0), e, 10).is_empty(), "enemy home unseen");
+    assert!(!texts(&w, None, e, 10).is_empty(), "a spectator sees it");
 }
 
 #[test]
@@ -687,6 +822,62 @@ fn icons_fit_inside_their_image() {
             "{k} fills its image: {span} of {full}"
         );
     }
+}
+
+#[test]
+fn upgrade_icons_differ_from_each_other_and_from_species() {
+    // TRIAGE row 53: no two upgrades look alike, no upgrade looks like a
+    // species, and every upgrade wears the upgrade disc.
+    let upgrades: Vec<(String, Vec<i32>)> = crate::rules::Upgrade::all()
+        .iter()
+        .map(|u| {
+            let k = format!("upgrade.{}", u.key());
+            let l = icon_list(&k, 1, 48).unwrap();
+            (k, l)
+        })
+        .collect();
+    let species: Vec<Vec<i32>> = Species::ALL
+        .iter()
+        .map(|s| icon_list(&format!("species.{}", s.key()), 1, 48).unwrap())
+        .collect();
+    for (i, (k, l)) in upgrades.iter().enumerate() {
+        for (k2, l2) in &upgrades[i + 1..] {
+            assert_ne!(l, l2, "{k} looks like {k2}");
+        }
+        assert!(!species.contains(l), "{k} looks like a species");
+        let first = &decode(l)[0];
+        assert_eq!((first.0, first.1[0]), (op::POLY, C_BASE), "{k} disc");
+    }
+    // The stat upgrades carry a glyph, not an ant.
+    for k in ["damage", "armor", "health", "build_rate"] {
+        let l = icon_list(&format!("upgrade.{k}"), 1, 48).unwrap();
+        assert!(
+            ant_shapes_drawn(&l, player(1)).is_empty(),
+            "upgrade.{k} draws an ant"
+        );
+    }
+}
+
+#[test]
+fn an_upgrade_icon_can_print_its_rank() {
+    let text = |k: &str| -> Vec<String> {
+        decode(&icon_list(k, 0, 48).unwrap())
+            .into_iter()
+            .filter(|(code, _)| *code == op::TEXT)
+            .map(|(_, a)| {
+                a[8..]
+                    .iter()
+                    .map(|c| char::from_u32(*c as u32).unwrap())
+                    .collect()
+            })
+            .collect()
+    };
+    assert!(text("upgrade.armor").is_empty());
+    assert_eq!(text("upgrade.armor@1"), vec!["I"]);
+    assert_eq!(text("upgrade.armor@3"), vec!["III"]);
+    assert_eq!(text("upgrade.species.fire@2"), vec!["II"]);
+    assert!(icon_list("upgrade.armor@4", 0, 48).is_none());
+    assert!(icon_list("upgrade.armor@x", 0, 48).is_none());
 }
 
 #[test]
