@@ -18,12 +18,12 @@ export const ONLINE = {
 
   // Namespaces this game's rooms away from other Trystero apps on the same
   // public relays.
-  appId: "antcolony-rts-p2p",
+  appId: "mandible-rts-p2p",
 
   // Encrypts session descriptions as they cross relays this project does not
   // run, so a relay cannot tamper with a handshake. Not a secret: it ships in
   // this file. Game traffic is DTLS-encrypted end to end regardless.
-  password: "antcolony-rts",
+  password: "mandible-rts",
 
   // The Nostr relays, pinned so the CSP can name them. All five come from
   // Trystero 0.25.4's own default list. Every page that loads web/online.js

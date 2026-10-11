@@ -76,7 +76,7 @@ Open rows in `SECOND-ORDER.md`. Those marked *person* are decisions for the pers
 - **Row 36, match length.** Now a median of 5:39 (Imago v Pupa) and 4:53 (Pupa v Larva) at 20 ticks per second.
 - **Row 40:** the name "Map Revealed".
 - **Row 25, Train 10 modifier.** Ctrl+W cannot be caught by a web page, so Alt also gives Train 10.
-- **Row 27, the game's name.** "Ant Colony" is a placeholder.
+- **Row 27, the game's name:** Mandible (chosen 2026-10-11).
 - **Row 31, Room Code play.** Online by Room Code, through the public relays, is untested: try it by hand. HTTPS hosting is needed across machines. There is no TURN server, so two players both behind strict NATs cannot connect (row 10).
 - **Row 13, Gather Focus.** A new player action that the brief did not mention.
 - **GLOSSARY.md:** many rows added during the build are marked ◆ (proposed) and need the person's review.

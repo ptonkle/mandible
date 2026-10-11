@@ -1,4 +1,4 @@
-# Ant Colony
+# Mandible
 
 A macro-focused real-time strategy game about ant colonies, played in the browser: 1v1, 2v2 or Free-for-all, against the AI or online. You never select an ant. You train them, place blueprints, set waypoints per species and buy upgrades, all from a keyboard-shaped action grid.
 

@@ -30,7 +30,7 @@ use crate::world::{Amount, Command, Controller, Focus, Refusal, Work, World, HIL
 
 /// Peers with different builds refuse each other; raise on every release
 /// that changes the simulation or the wire.
-pub const BUILD_ID: &str = "ant-colony-1";
+pub const BUILD_ID: &str = "mandible-1";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Screen {
