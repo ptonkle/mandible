@@ -102,8 +102,9 @@ pub fn wants_gallery(query: &str) -> bool {
         .any(|p| p == "gallery")
 }
 
-/// Benchmark options from the page's query string: `biome=flower_field`
-/// (or `picnic`), and `viewer=0`…`3` to draw that colony's Fog of War.
+/// Benchmark options from the page's query string: `biome=picnic`,
+/// `flower_field`, `forest_floor` or `riverbank`, and `viewer=0`…`3` to
+/// draw that colony's Fog of War.
 pub fn parse_options(query: &str) -> (Biome, Option<u8>) {
     let mut biome = Biome::Picnic;
     let mut viewer = None;
@@ -111,6 +112,8 @@ pub fn parse_options(query: &str) -> (Biome, Option<u8>) {
         match pair.split_once('=') {
             Some(("biome", "flower_field")) => biome = Biome::FlowerField,
             Some(("biome", "picnic")) => biome = Biome::Picnic,
+            Some(("biome", "forest_floor")) => biome = Biome::ForestFloor,
+            Some(("biome", "riverbank")) => biome = Biome::Riverbank,
             Some(("viewer", v)) => viewer = v.parse::<u8>().ok().filter(|v| *v < 4),
             _ => {}
         }
@@ -384,6 +387,8 @@ mod tests {
             (Biome::FlowerField, Some(2))
         );
         assert_eq!(parse_options("viewer=9"), (Biome::Picnic, None));
+        assert_eq!(parse_options("biome=forest_floor").0, Biome::ForestFloor);
+        assert_eq!(parse_options("biome=riverbank").0, Biome::Riverbank);
         assert!(wants_gallery("?biome=picnic&gallery"));
         assert!(!wants_gallery("?biome=picnic"));
         let mut b = Bench::new(800, 600, "?gallery");
