@@ -696,3 +696,22 @@ fn hill_holder_is_paid() {
     assert_eq!(w.colonies[0].stock[0], before[0] + 300);
     assert_eq!(w.colonies[1].stock, w.colonies[1].stock);
 }
+
+#[test]
+fn all_ants_never_moves_gatherers_or_builders() {
+    let mut w = world(25);
+    let (hx, hy) = home(&w, 0).cell();
+    w.apply(
+        0,
+        &Command::SetWaypoint {
+            species: None,
+            x: hx - 8,
+            y: hy,
+        },
+    );
+    for s in Species::ALL {
+        let has = !w.colonies[0].waypoints[s.index()].is_empty();
+        assert_eq!(has, s.is_combat(), "{s:?}");
+    }
+    assert!(w.colonies[0].waypoints[Species::Harvester.index()].is_empty());
+}
