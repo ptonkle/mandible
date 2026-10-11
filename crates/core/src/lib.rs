@@ -24,4 +24,5 @@ pub mod nav;
 pub mod render;
 pub mod rules;
 pub mod settings;
+pub mod sound;
 pub mod world;

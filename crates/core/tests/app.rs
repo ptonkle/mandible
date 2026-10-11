@@ -831,8 +831,5 @@ fn the_end_screen_graphs_every_colony_and_summarises_each() {
     let digits = top.to_string();
     assert!(["1", "2", "5"].contains(&&digits[..1]) && digits[1..].chars().all(|c| c == '0'));
     a.act("end.graph.3", "", false, false);
-    assert_eq!(
-        a.ui()["match"]["end"]["graph"]["title"],
-        "Army: Pop Cost"
-    );
+    assert_eq!(a.ui()["match"]["end"]["graph"]["title"], "Army: Pop Cost");
 }
