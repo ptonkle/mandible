@@ -2717,9 +2717,23 @@ mod tests {
                                 );
                             }
                         }
+                        // Decoration never opens a cache. (A Tunnels cache
+                        // can be open from the start, when its alcove's
+                        // connector runs through a tunnel.)
+                        let base = if t == MapType::Tunnels {
+                            generate_tunnels(seed, &s)
+                        } else {
+                            generate_open(seed, &s, true)
+                        };
+                        let b0 = base.home(0).clone();
+                        let base_reach = flood(&base, b0.cx, b0.cy, false);
                         for n in m.nodes.iter().filter(|n| n.cache) {
                             let (x, y) = n.pos.cell();
-                            assert!(!reach[m.idx(x, y)], "{t:?} seed {seed} {f:?} open cache");
+                            let open = reach[m.idx(x, y)];
+                            assert!(
+                                !open || (t == MapType::Tunnels && base_reach[m.idx(x, y)]),
+                                "{t:?} seed {seed} {f:?} open cache"
+                            );
                         }
                     }
                 }

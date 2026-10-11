@@ -1547,3 +1547,59 @@ fn an_enemy_behind_rock_does_not_hold_an_ant_against_it() {
         a.target
     );
 }
+
+// ---- TRIAGE row 52: less Nectar early ----
+
+#[test]
+fn balanced_sends_a_sixth_of_harvesters_to_nectar_and_starts_with_little() {
+    // Balanced is Food 3 : Nectar 1 : Leaves 2. Worked by hand for 12 idle
+    // Harvester Ants choosing in turn, each taking the resource with the
+    // most weight per ant already on it (ties to Food, then Nectar): F L F
+    // F N L F L F F N L, so 6 Food, 2 Nectar, 4 Leaves.
+    let mut w = arena(4);
+    let h = home(&w, 0);
+    for _ in 0..12 {
+        w.spawn_ant(0, Species::Harvester, h);
+    }
+    assert_eq!(w.colonies[0].focus, Focus::Balanced);
+    run(&mut w, 1);
+    let mut by = [0; 3];
+    for a in &w.ants {
+        if let Job::Gather(n) = a.job {
+            let r = w.nodes.iter().find(|x| x.id == n).unwrap().resource;
+            by[r.index()] += 1;
+        }
+    }
+    assert_eq!(by, [6, 2, 4]);
+    // Normal Starting Resources: 50 Nectar; the home Flower holds 1,000.
+    let w = world(4);
+    assert_eq!(w.colonies[0].stock, [300, 50, 200]);
+    let h = w.map.home(0).clone();
+    let flower: i32 = w
+        .nodes
+        .iter()
+        .filter(|n| n.resource == tool_core::rules::Resource::Nectar)
+        .filter(|n| n.pos.dist(Pos::of_cell(h.cx, h.cy)) <= h.r * CELL)
+        .map(|n| n.amount)
+        .sum();
+    assert_eq!(flower, 1000);
+}
+
+#[test]
+fn an_ai_with_nothing_left_to_defend_stops_scouting() {
+    // The AI keeps Auto-Scout on (it scouts chambers for nests and finds
+    // enemies to attack) until its last queen and hatchery are gone; then
+    // every ant left fights, rather than one wandering the map and making
+    // the match drag on.
+    let seats = [SeatKind::Human, SeatKind::Ai(Difficulty::Pupa)];
+    let mut w = World::new(5, MatchSettings::default(), &seats);
+    run(&mut w, ticks(50));
+    assert!(w.colonies[1].auto_scout, "on while it has a queen");
+    w.structures.retain(|s| s.colony != 1);
+    run(&mut w, ticks(50));
+    assert!(!w.colonies[1].auto_scout, "off with nothing to defend");
+    assert!(
+        w.colonies[0].auto_scout,
+        "a player's Auto-Scout is untouched"
+    );
+}
