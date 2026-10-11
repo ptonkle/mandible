@@ -340,12 +340,25 @@ fn pause_and_time_scale_run_a_local_sandbox_match_slower_or_faster() {
     a.act("time.pause", "", false, false);
     run(&mut a, 1000);
     assert_eq!(tick(&a), 150, "Pause stops time");
-    // Without Sandbox (and not spectating) there is no Pause.
+    // A plain Play vs AI match can Pause (button, P, or the open Menu), but
+    // has no Time Scale.
     let mut b = app();
     start_match(&mut b);
-    b.act("time.pause", "", false, false);
-    assert!(!b.game.as_ref().unwrap().paused);
-    assert!(b.ui()["match"]["controls"].as_array().unwrap().is_empty());
+    let ids: Vec<String> = b.ui()["match"]["controls"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["id"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(ids, vec!["time.pause"]);
+    b.key("KeyP", true, false, false);
+    assert!(b.game.as_ref().unwrap().paused);
+    run(&mut b, 1000);
+    assert_eq!(tick(&b), 0, "P pauses a plain Play vs AI match");
+    b.key("KeyP", true, false, false);
+    b.key("Escape", true, false, false);
+    run(&mut b, 1000);
+    assert_eq!(tick(&b), 0, "the open Menu pauses too");
 }
 
 #[test]
@@ -446,12 +459,12 @@ fn queen_and_brood_cell_tooltips_have_an_effect_row_and_build_buttons_a_tier() {
     let brood = button(&mut a, 1, 1);
     assert!(rows_of(&brood).contains(&("Effect".into(), "Housing +15".into())));
     // Tier badges: Queen 1, Acid Ant Hatchery (D) 2, Dinosaur Ant Hatchery 3.
-    assert_eq!(queen["tier"], "1");
-    assert_eq!(button(&mut a, 1, 6)["tier"], "2");
-    assert_eq!(button(&mut a, 1, 11)["tier"], "3");
+    assert_eq!(queen["tier"], "T1");
+    assert_eq!(button(&mut a, 1, 6)["tier"], "T2");
+    assert_eq!(button(&mut a, 1, 11)["tier"], "T3");
     // Ants and Upgrades too: Fire Ant is Tier 2; Damage I is Tier 1.
-    assert_eq!(button(&mut a, 0, 4)["tier"], "2");
-    assert_eq!(button(&mut a, 3, 0)["tier"], "1");
+    assert_eq!(button(&mut a, 0, 4)["tier"], "T2");
+    assert_eq!(button(&mut a, 3, 0)["tier"], "T1");
     // A Queen costs 250 Food: with 100 the button is greyed and says why.
     a.game.as_mut().unwrap().world.colonies[0].stock[0] = 100;
     let queen = button(&mut a, 1, 0);

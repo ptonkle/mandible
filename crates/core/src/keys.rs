@@ -31,7 +31,7 @@ pub const SLOTS: [&str; 22] = [
     "pan.up",
 ];
 
-pub const EXTRA_SLOTS: [&str; 1] = ["pan.down"];
+pub const EXTRA_SLOTS: [&str; 2] = ["pan.down", "pause"];
 
 fn default_key(slot: &str) -> &'static str {
     match slot {
@@ -58,6 +58,7 @@ fn default_key(slot: &str) -> &'static str {
         "pan.right" => "ArrowRight",
         "pan.up" => "ArrowUp",
         "pan.down" => "ArrowDown",
+        "pause" => "KeyP",
         _ => "",
     }
 }

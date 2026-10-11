@@ -226,8 +226,14 @@ impl Game {
     }
 
     /// Pause and Time Scale are offered: a local Sandbox or spectated match.
+    /// Time Scale: local Sandbox or spectated matches only.
     pub fn time_controls(&self) -> bool {
         self.lockstep.is_none() && (self.spectate || self.world.settings.sandbox)
+    }
+
+    /// Pause: any match that is not online (Play vs AI included).
+    pub fn can_pause(&self) -> bool {
+        self.lockstep.is_none()
     }
 
     /// Issues a command for the local colony: into the next tick when
@@ -946,8 +952,10 @@ impl App {
             };
             controls.push(json!({"id": "spectate.vision", "text": format!("{}: {whose}", self.t("hud.fog_of_war")), "term": self.t("hud.fog_of_war"), "active": false}));
         }
-        if g.time_controls() {
+        if g.can_pause() {
             controls.push(json!({"id": "time.pause", "text": self.t("time.pause"), "term": self.t("time.pause"), "active": g.paused}));
+        }
+        if g.time_controls() {
             controls.push(json!({"id": "time.scale", "text": format!("{}: {}", self.t("time.scale"), self.t(&format!("time.scale.{}", g.time_scale))), "term": self.t("time.scale"), "active": false}));
         }
 
@@ -1537,7 +1545,7 @@ impl App {
             "label": label,
             "icon": icon,
             "icon_text": icon_text,
-            "tier": tier.map(|t| t.to_string()).unwrap_or_default(),
+            "tier": tier.map(|t| format!("{}{t}", self.t("short.tier"))).unwrap_or_default(),
             "key": key,
             "state": state,
             "state_text": state_text,
@@ -1710,7 +1718,7 @@ impl App {
                 }
             }
             "time.pause" => {
-                if let Some(g) = self.game.as_mut().filter(|g| g.time_controls()) {
+                if let Some(g) = self.game.as_mut().filter(|g| g.can_pause()) {
                     g.paused = !g.paused;
                 }
             }
@@ -1916,6 +1924,8 @@ impl App {
                     g.confirm_concede = false;
                 }
             }
+        } else if slot == "pause" {
+            self.act("time.pause", "", false, false);
         } else if slot == "home" {
             if let Some(g) = &mut self.game {
                 let here = Pos::new(g.view.centre_x, g.view.centre_y);
@@ -2102,7 +2112,8 @@ impl App {
         } else {
             (1, 1)
         };
-        let paused = g.paused && g.time_controls();
+        // Paused, or the Menu is open: time stands still when not online.
+        let paused = (g.paused || g.menu_open) && g.can_pause();
         let dt = if paused { 0 } else { dt * num / den };
         g.acc_ms = (g.acc_ms + dt).min(ms * 8 * num);
         match &mut g.lockstep {

@@ -192,6 +192,7 @@ Rejected names. Do not reuse them without passing the naming test.
 | Term | Origin | Meaning | Never say |
 | --- | --- | --- | --- |
 | Tier | ★ | A colony's stage of advancement: Tier 1, Tier 2, Tier 3. Higher tiers unlock species and upgrades. | age, era, level, tech level, generation |
+| T1, T2, T3 | ◆ | The short form of Tier 1–3, on the corner of action buttons, without a box, so it never looks like a hotkey. | E1, L2, tier boxes |
 | Evolve | ★ | To pay resources to reach the next tier. The action is "Evolve to Tier 2". | advance, age up, tech up, level up |
 | Evolution | ★ | An evolve in progress, or its cost: "Evolution: 60s". | upgrade (never for tiers) |
 | Upgrade | ★ | A permanent, colony-wide improvement that applies to every ant of a species, or to every ant (a colony upgrade). Ranked I, II, III. | research, tech, enhancement, buff |
@@ -320,7 +321,7 @@ Rejected names. Do not reuse them without passing the naming test.
 | Starting Resources | ★ | A match setting: the stockpile each colony begins with. | starting bank, initial resources |
 | Map Revealed | ★ | A Match Setting, On or Off: every colony starts with every cell Explored, so the map's shape (rock, dirt, tunnels, chambers) and its nodes show from the first tick. Nothing is Visible until it is in Line of Sight. The word "Revealed" is used only in this name; a cell in sight is Visible. | map hack, full map |
 | Sandbox | ★ | A Match Setting, On or Off, for trying things out: human colonies have unlimited resources and start at Tier 3. A local Sandbox match also offers Pause and Time Scale. | creative mode, cheat mode, test mode |
-| Pause, Paused, Time Scale | ◆ | Local time controls, only in a Sandbox match or while spectating, never online: Pause stops time (the top bar shows "Paused"); Time Scale runs it at ×½, ×1, ×2 or ×4 of the Game Speed. | freeze, fast-forward, game speed (that is the match setting) |
+| Pause, Paused, Time Scale | ◆ | Local time controls, never online. Pause stops time in any match that is not online (button, hotkey P, and while the Menu is open; the top bar shows "Paused"). Time Scale runs time at ×½, ×1, ×2 or ×4 of the Game Speed, in a Sandbox match or while spectating only. | freeze, fast-forward, game speed (that is the match setting) |
 | ×½, ×1, ×2, ×4 | ◆ | The values of Time Scale. | half speed, double speed |
 | Campaign | ★ | Story mode. Later, not in the first version. | story, missions |
 | Civilization | ★ | Later: a colony type with unique species, bonuses and upgrades. The name is still to be chosen; "Civilization" is a placeholder. | faction, race |

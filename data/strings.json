@@ -262,5 +262,7 @@
  "time.scale.0": "×½",
  "time.scale.1": "×1",
  "time.scale.2": "×2",
- "time.scale.3": "×4"
+ "time.scale.3": "×4",
+ "short.tier": "T",
+ "keys.pause": "Pause"
 }

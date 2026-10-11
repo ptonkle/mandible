@@ -146,11 +146,11 @@ table.pairs td:first-child { color: var(--muted); white-space: nowrap; width: 12
   letter-spacing: 0.04em; color: var(--accent); pointer-events: none;
 }
 .gbtn .icon-text:empty { display: none; }
-/* The tier a button needs, as a small digit in the bottom-right corner. */
+/* The tier a button needs ("T2") in the bottom-right corner: plain text,
+   no box, so it never looks like a hotkey. */
 .gbtn .tier {
-  position: absolute; right: 0.15rem; bottom: 0.15rem; min-width: 0.9rem; height: 0.9rem; z-index: 1;
-  font-size: 0.6rem; font-weight: 700; line-height: 0.9rem; text-align: center; border-radius: 3px;
-  color: var(--soil); background: var(--muted); pointer-events: none;
+  position: absolute; right: 0.25rem; bottom: 0.2rem; z-index: 1;
+  font-size: 0.62rem; font-weight: 600; color: var(--muted); pointer-events: none;
 }
 .gbtn .tier:empty { display: none; }
 .qitem .fill { position: absolute; left: 0; bottom: 0; height: 3px; background: var(--accent); }
