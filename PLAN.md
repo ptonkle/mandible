@@ -43,6 +43,8 @@ The brief approves this plan in advance (autonomous mode), so building starts st
 | 24 | **Performance.** 1,200 ants: a simulation tick under 8 ms in release native and the draw list under 4 ms, measured by a release-only test and recorded in MEASUREMENTS.md. `tool_core` gets `opt-level = 3` in the dev and test profiles. | The brief names performance as important. 8 ms of a 100 ms tick leaves room for wasm overhead and slower machines. | `twelve_hundred_ants_tick_within_budget` (release); a frame-time check in the browser |
 | 25 | **Benchmark** (requested 2026-10-10). A Player Settings button starts the performance-test scenario live in the page: four colonies of about 300 ants each marching to the centre and fighting. A label–value panel shows frames per second, average and worst simulation tick, ant count, and the budget (tick under 8 ms, 60 frames per second). | So the person can see, not just read, what "acceptable performance" means. | browser interaction starts the Benchmark and reads the panel |
 
+| 26 | **Sound** (added 2026-10-11). The core synthesises every sound as a WAV file (`sound.rs`: integer oscillators, envelopes and noise), and `app.rs` decides which cue plays and when, with a cooldown. The page decodes and plays the bytes with Web Audio after the first click. | Keeps every number and rule in the core (D3), needs no audio files or network, and stays deterministic. | `every_cue_is_a_valid_wav_file`; `training_with_no_housing_room_plays_a_warning_once`; browser check "training past housing plays the Warning sound" |
+
 ## Open questions for the person
 
 None blocking: the brief approves the plan in advance. Choices the person may want to revisit are logged in `SECOND-ORDER.md` as they come up. The first ones:

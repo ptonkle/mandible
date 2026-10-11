@@ -89,6 +89,8 @@ pub struct PlayerSettings {
     /// An index into `EDGE_PAN_SPEEDS`; settings saved before it was added
     /// read as Normal.
     pub edge_pan_speed: usize,
+    /// Sound volume step: 0 Off, 1 Low, 2 Normal, 3 High.
+    pub volume: u8,
 }
 
 impl Default for PlayerSettings {
@@ -97,6 +99,7 @@ impl Default for PlayerSettings {
             keys: Vec::new(),
             edge_pan: true,
             edge_pan_speed: 2,
+            volume: 2,
         }
     }
 }

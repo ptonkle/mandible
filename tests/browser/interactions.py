@@ -172,6 +172,15 @@ def run(page, check, engine):
     box = page.evaluate("() => { const t = document.getElementById('tooltip'); const r = t.getBoundingClientRect(); return [t.hidden, r.top, r.left, r.right, innerWidth]; }")
     check(not box[0] and box[1] >= 0 and box[2] >= 0 and box[3] <= box[4], f"the queue-bar tooltip shows inside the window {box}")
 
+    # Sound (TRIAGE: warnings): training with no housing room plays the
+    # Warning, made by the core as a WAV file and played through Web Audio.
+    page.keyboard.press("Digit1")
+    for _ in range(12):
+        page.keyboard.press("Control+KeyQ")
+    page.wait_for_timeout(600)
+    played = page.evaluate("() => document.body.dataset.sound || ''")
+    check(played == "warning", f"training past housing plays the Warning sound [{played}]")
+
     # Esc opens the menu; Concede ends the match in Defeat.
     page.mouse.move(700, 400)
     page.keyboard.press("Escape")

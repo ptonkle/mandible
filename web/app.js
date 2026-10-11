@@ -598,6 +598,49 @@ function flushNet() {
   });
 }
 
+// ---- sound: the core makes every sound (WAV bytes); the page only plays ----
+
+let audio = null;
+let buffers = {};
+let buffersVolume = null;
+
+// Browsers allow sound only after the person's first click or key press.
+function wakeAudio() {
+  if (!audio) {
+    try {
+      audio = new AudioContext();
+    } catch (e) {
+      audio = null;
+    }
+  } else if (audio.state === "suspended") {
+    audio.resume();
+  }
+}
+window.addEventListener("pointerdown", wakeAudio, true);
+window.addEventListener("keydown", wakeAudio, true);
+
+async function play(key) {
+  if (!audio) return;
+  if (buffersVolume !== ui.volume) {
+    buffers = {};
+    buffersVolume = ui.volume;
+  }
+  try {
+    if (!buffers[key]) {
+      const bytes = game.sound(key);
+      if (!bytes.length) return;
+      buffers[key] = await audio.decodeAudioData(bytes.slice().buffer);
+    }
+    const source = audio.createBufferSource();
+    source.buffer = buffers[key];
+    source.connect(audio.destination);
+    source.start();
+    document.body.dataset.sound = key;
+  } catch (e) {
+    // A sound that cannot play is skipped; the game goes on.
+  }
+}
+
 // ---- the loop ----
 
 function refresh() {
@@ -615,6 +658,7 @@ function refresh() {
     writeStore("player", ui.save.player);
   }
   if (ui.navigate) window.location.href = ui.navigate;
+  if (ui.sounds) ui.sounds.forEach(play);
   if (ui.net_requests) ui.net_requests.forEach(netRequest);
   const inMatch = ui.screen === "match";
   const starting = inMatch && el("match").hidden;

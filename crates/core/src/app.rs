@@ -26,6 +26,7 @@ use crate::settings::{
     can_disable, Biome, Difficulty, Format, GameSpeed, Level, MapType, MatchSettings, SeatKind,
     TUNNEL_MAX, TUNNEL_MIN,
 };
+use crate::sound::Cue;
 use crate::world::{
     Amount, Command, Controller, Focus, Refusal, Sample, Work, World, HILL_REWARD, SAMPLE_TICKS,
 };
@@ -153,6 +154,10 @@ pub fn to_pixels(cam: &Camera, p: Pos) -> (i32, i32) {
 
 pub struct Game {
     pub world: World,
+    /// The last tick whose announcements were turned into sounds.
+    pub heard: i32,
+    /// Victory or Defeat has played.
+    pub sounded_end: bool,
     pub me: u8,
     pub tab: usize,
     pub mode: Mode,
@@ -205,6 +210,8 @@ impl Game {
             pending: Vec::new(),
             lockstep,
             ended_at: None,
+            heard: 0,
+            sounded_end: false,
             spectate: false,
             vision: None,
             paused: false,
@@ -307,6 +314,10 @@ pub struct App {
     /// The seed for a new match, supplied by the page (it has the entropy).
     pub entropy: u64,
     pub navigate: Option<String>,
+    /// Sounds to play this frame, taken by the page.
+    pub sounds: Vec<Cue>,
+    /// When each sound last played, for its cooldown.
+    pub last_cue: BTreeMap<Cue, i64>,
 }
 
 fn text_map(json: &str) -> Result<BTreeMap<String, String>, String> {
@@ -367,6 +378,8 @@ impl App {
             save: None,
             entropy: 1,
             navigate: None,
+            sounds: Vec::new(),
+            last_cue: BTreeMap::new(),
         })
     }
 
@@ -414,6 +427,7 @@ impl App {
 
     /// Everything the page shows, as JSON.
     pub fn ui(&mut self) -> Value {
+        self.listen();
         let mut v = json!({
             "screen": match self.screen {
                 Screen::MainMenu => "main_menu",
@@ -446,6 +460,11 @@ impl App {
         if let Some(n) = self.navigate.take() {
             v["navigate"] = json!(n);
         }
+        if !self.sounds.is_empty() {
+            let keys: Vec<&str> = self.sounds.drain(..).map(|c| c.key()).collect();
+            v["sounds"] = json!(keys);
+        }
+        v["volume"] = json!(self.player.volume);
         v
     }
 
@@ -762,6 +781,18 @@ impl App {
                     vec![("on".into(), self.t("on")), ("off".into(), self.t("off"))],
                     if self.player.edge_pan { "on" } else { "off" },
                 ));
+                rows.push(
+                    self.select(
+                        "player.volume",
+                        "keys.volume",
+                        ["off", "level.low", "level.normal", "level.high"]
+                            .iter()
+                            .enumerate()
+                            .map(|(i, k)| (i.to_string(), self.t(k)))
+                            .collect(),
+                        &self.player.volume.to_string(),
+                    ),
+                );
                 let speeds = crate::keys::EDGE_PAN_SPEEDS
                     .iter()
                     .map(|(k, _)| (k.to_string(), self.t(&format!("speed.word.{k}"))))
@@ -1951,6 +1982,13 @@ impl App {
                 self.player.edge_pan = value == "on";
                 self.save_settings();
             }
+            "player.volume" => {
+                if let Ok(v) = value.parse::<u8>() {
+                    self.player.volume = v.min(3);
+                    self.save_settings();
+                    self.cue(Cue::Click);
+                }
+            }
             "player.edge_pan_speed" => {
                 if let Some(i) = crate::keys::EDGE_PAN_SPEEDS
                     .iter()
@@ -2068,6 +2106,11 @@ impl App {
         };
         match b {
             Button::Train(species) => {
+                // No housing room left: warn now (training would only wait).
+                let w = &g.world;
+                let me = g.me;
+                let full = !g.spectate
+                    && w.population(me) + w.queued_pop(me) + species.stats().pop > w.housing(me);
                 let amount = if shift {
                     Amount::Max
                 } else if ctrl {
@@ -2076,6 +2119,9 @@ impl App {
                     Amount::One
                 };
                 g.issue(Command::Train { species, amount });
+                if full {
+                    self.cue(Cue::Warning);
+                }
             }
             Button::Place(StructureKind::Wall) => g.mode = Mode::Wall(None),
             Button::Place(k) => g.mode = Mode::Place(k),
@@ -2394,6 +2440,68 @@ impl App {
                 // Behind (a peer waited): never run ahead of real time later.
                 g.acc_ms = g.acc_ms.min(ms * 2);
             }
+        }
+    }
+
+    // ---- sound ----
+
+    /// Queues a sound unless it played within its cooldown.
+    pub fn cue(&mut self, c: Cue) {
+        let last = self.last_cue.get(&c).copied();
+        if last.is_some_and(|t| self.now_ms - t < c.cooldown_ms()) {
+            return;
+        }
+        self.last_cue.insert(c, self.now_ms);
+        self.sounds.push(c);
+    }
+
+    /// Turns the match's new notices and announcements into sounds.
+    fn listen(&mut self) {
+        let Some(g) = &mut self.game else {
+            return;
+        };
+        let me = g.me;
+        let mut cues = Vec::new();
+        for a in g.world.announcements.iter().filter(|a| a.tick > g.heard) {
+            if a.colony.is_some_and(|c| c != me) {
+                continue;
+            }
+            let k = a.key.as_str();
+            let c = if k.starts_with("notice.upgraded") || k.starts_with("notice.evolved") {
+                Some(Cue::Complete)
+            } else if k == "notice.queen_lost" {
+                Some(Cue::Alert)
+            } else if k.starts_with("announce.windfall") || k == "announce.hill" {
+                Some(Cue::Event)
+            } else if k.starts_with("notice.") {
+                // Every other notice is a refusal: not enough, needs a tier,
+                // Pop Cap, a blocked placement…
+                Some(Cue::Warning)
+            } else {
+                None
+            };
+            cues.extend(c);
+        }
+        g.heard = g.world.tick;
+        if let (Some(team), false) = (g.world.winner, g.sounded_end) {
+            g.sounded_end = true;
+            let mine = g.world.colonies[me as usize].team;
+            cues.push(if g.spectate || team == mine {
+                Cue::Victory
+            } else {
+                Cue::Defeat
+            });
+        }
+        for c in cues {
+            self.cue(c);
+        }
+    }
+
+    /// The WAV file for a sound, at the Player Settings volume.
+    pub fn sound(&self, key: &str) -> Vec<u8> {
+        match Cue::from_key(key) {
+            Some(c) => crate::sound::wav(c, crate::sound::volume_percent(self.player.volume)),
+            None => Vec::new(),
         }
     }
 

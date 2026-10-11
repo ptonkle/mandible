@@ -275,5 +275,6 @@
  "map_type.open": "Open Ground",
  "map_type.maze": "Maze",
  "biome.forest_floor": "Forest Floor",
- "biome.riverbank": "Riverbank"
+ "biome.riverbank": "Riverbank",
+ "keys.volume": "Volume"
 }

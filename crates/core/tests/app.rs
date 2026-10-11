@@ -833,3 +833,34 @@ fn the_end_screen_graphs_every_colony_and_summarises_each() {
     a.act("end.graph.3", "", false, false);
     assert_eq!(a.ui()["match"]["end"]["graph"]["title"], "Army: Pop Cost");
 }
+
+#[test]
+fn training_with_no_housing_room_plays_a_warning_once() {
+    let mut a = app();
+    start_match(&mut a);
+    {
+        // Fill the queen's 20 housing: 10 ants now + 10 queued.
+        let g = a.game.as_mut().unwrap();
+        g.world.colonies[0].stock = [5000, 0, 0];
+    }
+    a.act("tab.0", "", false, false);
+    a.act("grid.1", "", true, false); // Train 10 Soldier Ants: 10 + 10 = 20, room for all
+    a.advance(100);
+    assert!(
+        a.ui().get("sounds").is_none(),
+        "no warning while there is room"
+    );
+    a.act("grid.1", "", false, false); // one more: no room
+    let ui = a.ui();
+    assert_eq!(ui["sounds"], serde_json::json!(["warning"]));
+    // Pressed again at once: the cooldown keeps it from repeating.
+    a.act("grid.1", "", false, false);
+    assert!(a.ui().get("sounds").is_none());
+    // The sound itself is a WAV file at the Player Settings volume.
+    assert_eq!(&a.sound("warning")[0..4], b"RIFF");
+    a.act("player.volume", "0", false, false);
+    assert!(
+        a.sound("warning")[44..].iter().all(|b| *b == 0),
+        "Volume Off is silent"
+    );
+}

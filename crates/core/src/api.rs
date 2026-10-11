@@ -167,6 +167,11 @@ impl Session {
             .unwrap_or_default()
     }
 
+    /// A sound's WAV bytes (see `App::sound`); empty for an unknown key.
+    pub fn sound(&self, key: &str) -> Vec<u8> {
+        self.app.as_ref().map(|a| a.sound(key)).unwrap_or_default()
+    }
+
     pub fn app(&mut self) -> Option<&mut App> {
         self.app.as_mut()
     }

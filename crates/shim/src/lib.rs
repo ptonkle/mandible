@@ -87,6 +87,10 @@ impl Game {
         self.s.frame()
     }
 
+    pub fn sound(&self, key: &str) -> Vec<u8> {
+        self.s.sound(key)
+    }
+
     pub fn icons(&self) -> String {
         self.s.icons()
     }
