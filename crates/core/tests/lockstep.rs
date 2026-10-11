@@ -6,8 +6,8 @@ use std::collections::BTreeMap;
 
 use tool_core::lockstep::loopback::{Event, Loopback};
 use tool_core::lockstep::{
-    Lobby, LobbyStatus, Match, MatchStatus, Msg, Outgoing, RefuseReason, SeatKind, TickInput,
-    Version, CHECKSUM_EVERY, MAX_MESSAGE_BYTES,
+    Lobby, LobbyError, LobbyStatus, Match, MatchStatus, Msg, Outgoing, PeerId, RefuseReason,
+    SeatKind, TickInput, Version, CHECKSUM_EVERY, MAX_MESSAGE_BYTES, PROTOCOL_VERSION,
 };
 
 const MS_PER_TICK: u32 = 50;
@@ -55,6 +55,9 @@ struct Client {
     manual_snapshot: bool,
     /// Times a due tick had to wait for a turn.
     stalls: u32,
+    /// A command queued as soon as the next match begins: in its turn for
+    /// tick 0.
+    first_command: Option<String>,
 }
 
 impl Client {
@@ -172,7 +175,24 @@ impl World {
         w
     }
 
+    /// Every seated joiner presses Ready Up; runs until the host sees it.
+    fn ready_all(&mut self) {
+        let now = self.now;
+        for i in 1..self.clients.len() {
+            if let Some(l) = self.clients[i].lobby.as_mut() {
+                if let Ok(out) = l.set_ready(true, now) {
+                    self.net.send(i, out);
+                }
+            }
+        }
+        let ready = self.run_until(10_000, |w| {
+            w.clients[0].lobby.as_ref().is_some_and(|l| l.all_ready())
+        });
+        assert!(ready, "the host never saw every joiner ready");
+    }
+
     fn host_starts(&mut self) {
+        self.ready_all();
         let now = self.now;
         let out = self.clients[0]
             .lobby
@@ -195,8 +215,16 @@ impl World {
         };
         let (mut game, out) = Match::new(start, now);
         game.set_delay_override(self.fixed_delay);
+        if let Some(cmd) = c.first_command.take() {
+            game.queue_command(cmd);
+        }
         c.game = Some(game);
+        c.lobby = None;
         c.started_at = now;
+        // A new match (a rematch too) starts from a fresh state.
+        c.state = 0;
+        c.sums.clear();
+        c.drops.clear();
         self.net.send(i, out);
     }
 
@@ -209,6 +237,21 @@ impl World {
         let out = {
             let c = &mut self.clients[i];
             match (&ev, c.game.as_mut(), c.lobby.as_mut()) {
+                (Event::Message { from, text, .. }, Some(g), _) if g.is_rematch(from, text) => {
+                    // The host's Rematch: back to its lobby.
+                    let (mut l, mut out) = Lobby::rejoin(
+                        Version::current(BUILD),
+                        from.clone(),
+                        &format!("c{i}"),
+                        &format!("Player {i}"),
+                        g,
+                        now,
+                    );
+                    out.extend(l.receive(from, text, now));
+                    c.lobby = Some(l);
+                    c.game = None;
+                    out
+                }
                 (Event::Message { from, text, .. }, Some(g), _) => g.receive(from, text, now),
                 (Event::Message { from, text, .. }, None, Some(l)) => {
                     if Msg::decode(text).is_some_and(|m| matches!(m, Msg::Start { .. })) {
@@ -574,7 +617,7 @@ fn wrong_version_is_refused_by_name() {
         assert_eq!(
             w.clients[1].lobby.as_ref().unwrap().status(),
             &LobbyStatus::Refused(RefuseReason::WrongVersion {
-                host_proto: 1,
+                host_proto: PROTOCOL_VERSION,
                 host_build: BUILD.to_string()
             })
         );
@@ -736,4 +779,702 @@ fn a_large_snapshot_is_sent_in_chunks_under_16_kb() {
     w.net.send(0, out);
     w.run_until(10_000, |w| w.clients[1].last_snapshot.is_some());
     assert_eq!(w.clients[1].last_snapshot.as_deref(), Some(big.as_str()));
+}
+
+// ---- Ready Up, the seat count and Rematch (TRIAGE rows 40, 41, 49) ----
+
+fn seated(w: &mut World) {
+    let ok = w.run_until(10_000, |w| {
+        w.clients.iter().skip(1).all(|c| {
+            matches!(
+                c.lobby.as_ref().map(|l| l.status()),
+                Some(LobbyStatus::Seated(_))
+            )
+        })
+    });
+    assert!(ok, "not every joiner was seated");
+}
+
+fn ready_up(w: &mut World, i: usize, ready: bool) {
+    let now = w.now;
+    let out = w.clients[i]
+        .lobby
+        .as_mut()
+        .unwrap()
+        .set_ready(ready, now)
+        .unwrap();
+    w.net.send(i, out);
+}
+
+#[test]
+fn the_host_starts_only_when_every_joiner_is_ready() {
+    let mut w = World::lobby(3, 20, 25, 10, 150);
+    seated(&mut w);
+    let now = w.now;
+    assert_eq!(
+        w.clients[0]
+            .lobby
+            .as_mut()
+            .unwrap()
+            .start(1, MS_PER_TICK, now),
+        Err(LobbyError::NotReady)
+    );
+    ready_up(&mut w, 1, true);
+    w.run_for(4_000);
+    for c in &w.clients {
+        let l = c.lobby.as_ref().unwrap();
+        let seat = l
+            .seats()
+            .iter()
+            .position(|s| s.client_id() == Some("c1"))
+            .unwrap();
+        assert!(l.seats()[seat].ready(), "every client sees c1 ready");
+    }
+    assert!(!w.clients[0].lobby.as_ref().unwrap().all_ready());
+    // c1 takes it back; c2 readies.
+    ready_up(&mut w, 1, false);
+    ready_up(&mut w, 2, true);
+    w.run_for(4_000);
+    assert!(!w.clients[0].lobby.as_ref().unwrap().all_ready());
+    assert!(!w.clients[1].lobby.as_ref().unwrap().is_ready());
+    assert!(w.clients[2].lobby.as_ref().unwrap().is_ready());
+    // New Match Settings clear every mark.
+    let now = w.now;
+    let out = w.clients[0]
+        .lobby
+        .as_mut()
+        .unwrap()
+        .set_settings("{\"x\":2}", now)
+        .unwrap();
+    w.net.send(0, out);
+    w.run_for(4_000);
+    assert!(
+        !w.clients[2].lobby.as_ref().unwrap().is_ready(),
+        "new settings clear Ready Up"
+    );
+    w.host_starts();
+    assert!(w.run_until(5_000, |w| w.clients.iter().all(|c| c.game.is_some())));
+}
+
+#[test]
+fn a_lobby_hosted_with_two_seats_grows_to_four_humans() {
+    let mut w = World::lobby(4, 21, 20, 5, 0);
+    let mut host = Lobby::host(Version::current(BUILD), "c0", "Ann", 2, "{}", 0);
+    let out = host.set_seat_count(4, 0).unwrap();
+    w.clients[0].lobby = Some(host);
+    w.net.send(0, out);
+    seated(&mut w);
+    let now = w.now;
+    let host = w.clients[0].lobby.as_mut().unwrap();
+    assert_eq!(host.seats().len(), 4);
+    assert_eq!(
+        host.set_seat_count(2, now),
+        Err(LobbyError::SeatTaken),
+        "four humans do not fit in two seats"
+    );
+    w.host_starts();
+    assert!(w.run_until(5_000, |w| w.clients.iter().all(|c| c.game.is_some())));
+    set_commands(&mut w, 3);
+    assert!(w.play_to(300, 60_000), "four humans play");
+    w.assert_in_step();
+}
+
+#[test]
+fn shrinking_the_lobby_moves_a_human_into_a_kept_seat() {
+    let mut w = World::lobby(2, 22, 20, 0, 0);
+    let mut host = Lobby::host(Version::current(BUILD), "c0", "Ann", 4, "{}", 0);
+    let _ = host.set_seat(1, SeatKind::Closed, 0).unwrap();
+    let _ = host.set_seat(2, SeatKind::Ai { difficulty: 0 }, 0).unwrap();
+    w.clients[0].lobby = Some(host);
+    seated(&mut w);
+    assert_eq!(
+        w.clients[1].lobby.as_ref().unwrap().status(),
+        &LobbyStatus::Seated(3)
+    );
+    let now = w.now;
+    let out = w.clients[0]
+        .lobby
+        .as_mut()
+        .unwrap()
+        .set_seat_count(2, now)
+        .unwrap();
+    w.net.send(0, out);
+    w.run_for(1_000);
+    assert_eq!(
+        w.clients[1].lobby.as_ref().unwrap().status(),
+        &LobbyStatus::Seated(1)
+    );
+    assert_eq!(w.clients[1].lobby.as_ref().unwrap().seats().len(), 2);
+}
+
+#[test]
+fn a_joiner_that_loses_the_host_says_so() {
+    let mut w = World::lobby(2, 23, 20, 0, 0);
+    w.run_for(1_000);
+    w.leave(0);
+    w.run_for(500);
+    assert_eq!(
+        w.clients[1].lobby.as_ref().unwrap().status(),
+        &LobbyStatus::Lost
+    );
+}
+
+#[test]
+fn names_are_trimmed_and_kept_short() {
+    let mut w = World::lobby(2, 24, 20, 0, 0);
+    w.run_for(200);
+    let now = w.now;
+    let hello = Msg::Hello {
+        proto: PROTOCOL_VERSION,
+        build: BUILD.to_string(),
+        client_id: "long".into(),
+        name: "  A very long name indeed\n".into(),
+    };
+    let mut host = Lobby::host(Version::current(BUILD), "c0", "Ann", 4, "{}", now);
+    host.receive(&PeerId("x".into()), &hello.encode(), now);
+    let seat = host
+        .seats()
+        .iter()
+        .find(|s| s.client_id() == Some("long"))
+        .unwrap();
+    match &seat.kind {
+        SeatKind::Human { name, .. } => assert_eq!(name, "A very long name"),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn a_rematch_brings_every_joiner_back_to_the_same_lobby() {
+    // Started at once: old turns reach the new match.
+    rematch_run(0);
+}
+
+#[test]
+fn a_rematch_started_later_keeps_old_turns_out_of_the_lobby() {
+    // Started once every new-round ping is in: old turns reach the lobby.
+    rematch_run(2_000);
+}
+
+/// Joiner-to-joiner messages are slow, and the host calls the rematch at
+/// once, so the joiners' old turns from tick 0 are still on the way to each
+/// other when both are back in the lobby. Joiner 1's first new turn differs
+/// from its first old one, so an old turn taken for a new one shows as a
+/// desync. The host starts the rematch `wait_ms` after everyone is back.
+fn rematch_run(wait_ms: i64) {
+    let mut w = World::lobby(3, 25, 30, 20, 0);
+    w.net.set_link(1, 2, 400, 0);
+    seated(&mut w);
+    let now = w.now;
+    let out = w.clients[0]
+        .lobby
+        .as_mut()
+        .unwrap()
+        .set_seat(3, SeatKind::Ai { difficulty: 1 }, now)
+        .unwrap();
+    w.net.send(0, out);
+    w.host_starts();
+    assert!(w.run_until(5_000, |w| w.clients.iter().all(|c| c.game.is_some())));
+    w.goal = 10_000;
+    w.run_for(100);
+    let seats_before = w.clients[0].game.as_ref().unwrap().seats().to_vec();
+    let now = w.now;
+    let (lobby, out) = Lobby::rematch(
+        Version::current(BUILD),
+        "c0",
+        "Ann",
+        w.clients[0].game.as_ref().unwrap(),
+        now,
+    );
+    w.clients[0].game = None;
+    w.clients[0].lobby = Some(lobby);
+    w.net.send(0, out);
+    let back = w.run_until(10_000, |w| {
+        w.clients.iter().skip(1).all(|c| {
+            c.game.is_none()
+                && matches!(
+                    c.lobby.as_ref().map(|l| l.status()),
+                    Some(LobbyStatus::Seated(_))
+                )
+        })
+    });
+    assert!(back, "every joiner came back to the lobby");
+    for c in &w.clients {
+        let l = c.lobby.as_ref().unwrap();
+        assert_eq!(l.seats().len(), seats_before.len());
+        for (now, before) in l.seats().iter().zip(&seats_before) {
+            assert_eq!(now.client_id(), before.client_id(), "the same seats");
+            assert!(!now.ready(), "Ready Up is cleared");
+        }
+        assert_eq!(l.seats()[3].kind, SeatKind::Ai { difficulty: 1 });
+    }
+    w.run_for(wait_ms);
+    w.clients[1].first_command = Some("new-match".into());
+    w.host_starts();
+    set_commands(&mut w, 1);
+    assert!(w.run_until(5_000, |w| w.clients.iter().all(|c| c.game.is_some())));
+    assert!(w.play_to(300, 120_000), "the rematch runs");
+    w.assert_in_step();
+    let desyncs: Vec<u32> = w
+        .clients
+        .iter()
+        .map(|c| c.game.as_ref().unwrap().desyncs_detected())
+        .collect();
+    assert_eq!(
+        desyncs,
+        vec![0, 0, 0],
+        "no old turn was taken for a new one"
+    );
+}
+
+#[test]
+fn a_rematch_opens_the_seat_of_a_player_who_left() {
+    let mut w = World::started(3, 0, 26, 30, 0);
+    assert!(w.play_to(60, 60_000));
+    w.leave(2);
+    w.run_for(200);
+    let now = w.now;
+    let (lobby, _) = Lobby::rematch(
+        Version::current(BUILD),
+        "c0",
+        "Ann",
+        w.clients[0].game.as_ref().unwrap(),
+        now,
+    );
+    let gone = w.clients[0]
+        .game
+        .as_ref()
+        .unwrap()
+        .seats()
+        .iter()
+        .position(|s| s.client_id() == Some("c2"))
+        .unwrap();
+    assert_eq!(lobby.seats()[gone].kind, SeatKind::Open);
+    assert!(lobby.seats().iter().any(|s| s.client_id() == Some("c1")));
+}
+
+// ---- the same through the App, with the page's transport faked ----
+
+mod through_the_app {
+    use serde_json::Value;
+    use tool_core::app::{App, Screen};
+
+    fn app(id: &str) -> App {
+        let strings = include_str!("../../../data/strings.json");
+        let glossary = include_str!("../../../data/glossary.json");
+        App::new(strings, glossary, "", "", id).expect("data files parse")
+    }
+
+    fn peer(i: usize) -> String {
+        format!("p{i}")
+    }
+
+    /// Apps joined in a mesh: what one sends, the others receive at once.
+    struct Mesh {
+        apps: Vec<App>,
+        linked: Vec<bool>,
+        now: i64,
+        /// Transport requests each app made, by op.
+        ops: Vec<Vec<String>>,
+    }
+
+    impl Mesh {
+        fn new(n: usize) -> Mesh {
+            let mut apps: Vec<App> = (0..n).map(|i| app(&format!("c{i}"))).collect();
+            for a in &mut apps {
+                a.act("online.room", "TEST", false, false);
+            }
+            Mesh {
+                apps,
+                linked: vec![false; n],
+                now: 1_000,
+                ops: vec![Vec::new(); n],
+            }
+        }
+
+        /// App `i` reaches every linked app (the host first announces itself).
+        fn link(&mut self, i: usize) {
+            for j in 0..self.apps.len() {
+                if j != i && self.linked[j] {
+                    self.apps[i].net_event("connected", &peer(j), "", j == 0);
+                    self.apps[j].net_event("connected", &peer(i), "", i == 0);
+                }
+            }
+            self.linked[i] = true;
+        }
+
+        fn unlink(&mut self, i: usize) {
+            self.linked[i] = false;
+            for j in 0..self.apps.len() {
+                if j != i && self.linked[j] {
+                    self.apps[j].net_event("disconnected", &peer(i), "", false);
+                }
+            }
+        }
+
+        fn ui(&mut self, i: usize) -> Value {
+            let ui = self.apps[i].ui();
+            if let Some(reqs) = ui["net_requests"].as_array() {
+                // As the page does: messages go out before the transport acts.
+                self.deliver(i);
+                for r in reqs {
+                    let op = r["op"].as_str().unwrap_or("").to_string();
+                    if op == "leave" && self.linked[i] {
+                        self.unlink(i);
+                    }
+                    self.ops[i].push(op);
+                }
+            }
+            ui
+        }
+
+        fn step(&mut self) {
+            self.now += 20;
+            for i in 0..self.apps.len() {
+                self.apps[i].advance(self.now);
+                self.ui(i);
+                self.deliver(i);
+            }
+        }
+
+        fn deliver(&mut self, i: usize) {
+            let out = self.apps[i].take_outbox();
+            for m in out.as_array().unwrap() {
+                let text = m["text"].as_str().unwrap();
+                for j in 0..self.apps.len() {
+                    let to_j = m["to"].is_null() || m["to"].as_str() == Some(&peer(j));
+                    if j != i && to_j && self.linked[i] && self.linked[j] {
+                        self.apps[j].net_event("message", &peer(i), text, false);
+                    }
+                }
+            }
+        }
+
+        fn run(&mut self, ms: i64) {
+            for _ in 0..ms / 20 {
+                self.step();
+            }
+        }
+
+        fn act(&mut self, i: usize, id: &str, value: &str) {
+            self.apps[i].act(id, value, false, false);
+            self.ui(i);
+        }
+
+        fn panels(&mut self, i: usize) -> String {
+            self.ui(i)["panels"].to_string()
+        }
+
+        fn seats(&self, i: usize) -> usize {
+            self.apps[i]
+                .online
+                .lobby
+                .as_ref()
+                .map(|l| l.seats().len())
+                .unwrap_or(0)
+        }
+    }
+
+    /// Host with the Default Match Settings (1v1), switch to Free-for-all,
+    /// three more humans join, each by its own Player Name.
+    fn four_in_a_lobby() -> Mesh {
+        let mut m = Mesh::new(4);
+        for (i, name) in ["Ann", "Bo", "Cy", "Di"].iter().enumerate() {
+            m.act(i, "go.online", "");
+            m.act(i, "online.name", name);
+        }
+        m.act(0, "online.host", "");
+        assert_eq!(m.seats(0), 2, "a 1v1 lobby has two seats");
+        m.act(0, "lobby.format", "free_for_all");
+        assert_eq!(m.seats(0), 4, "Free-for-all gives the lobby four seats");
+        m.link(0);
+        for i in 1..4 {
+            m.act(i, "online.join", "");
+            m.link(i);
+        }
+        m.run(2_000);
+        for i in 1..4 {
+            assert_eq!(m.apps[i].screen, Screen::Lobby, "app {i} is in the lobby");
+        }
+        let host = m.panels(0);
+        for name in ["Ann", "Bo", "Cy", "Di"] {
+            assert!(host.contains(name), "the host's lobby shows {name}");
+        }
+        m
+    }
+
+    fn start_disabled(m: &mut Mesh) -> bool {
+        let ui = m.ui(0);
+        let row = ui["panels"].as_array().unwrap().last().unwrap().clone();
+        let start = row["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|b| b["id"] == "lobby.start")
+            .cloned()
+            .unwrap();
+        start["disabled"] == Value::Bool(true)
+    }
+
+    #[test]
+    fn four_humans_ready_up_and_start_from_a_1v1_default() {
+        let mut m = four_in_a_lobby();
+        assert!(start_disabled(&mut m), "Start waits for Ready Up");
+        m.act(0, "lobby.start", "");
+        assert_eq!(m.apps[0].screen, Screen::Lobby, "not every joiner is ready");
+        for i in 1..4 {
+            m.act(i, "lobby.ready", "");
+        }
+        m.run(1_000);
+        assert!(
+            m.panels(0).matches("Readied").count() == 3,
+            "the host sees who is ready"
+        );
+        // One takes it back, then readies again.
+        m.act(2, "lobby.ready", "");
+        m.run(1_000);
+        assert!(start_disabled(&mut m));
+        m.act(2, "lobby.ready", "");
+        m.run(1_000);
+        assert!(!start_disabled(&mut m));
+        m.act(0, "lobby.start", "");
+        m.run(2_000);
+        for i in 0..4 {
+            assert_eq!(m.apps[i].screen, Screen::Match, "app {i} plays");
+        }
+        m.run(3_000);
+        let ticks: Vec<i32> = m
+            .apps
+            .iter()
+            .map(|a| a.game.as_ref().unwrap().world.tick)
+            .collect();
+        assert!(ticks.iter().all(|t| *t > 20), "{ticks:?}");
+    }
+
+    #[test]
+    fn the_host_sets_ai_difficulty_and_closes_seats_in_any_format() {
+        let mut m = Mesh::new(2);
+        m.act(0, "go.online", "");
+        m.act(0, "online.host", "");
+        m.act(0, "lobby.format", "two_v_two");
+        m.act(0, "seat.1", "ai.2");
+        m.act(0, "seat.2", "ai.0");
+        m.act(0, "seat.3", "closed");
+        let p = m.panels(0);
+        assert!(
+            p.contains("\"value\":\"ai.2\"") && p.contains("\"value\":\"ai.0\""),
+            "{p}"
+        );
+        assert!(p.contains("\"value\":\"closed\""));
+        m.act(0, "lobby.start", "");
+        assert_eq!(m.apps[0].screen, Screen::Match);
+        let w = &m.apps[0].game.as_ref().unwrap().world;
+        use tool_core::settings::Difficulty;
+        use tool_core::world::Controller;
+        assert_eq!(w.colonies[1].controller, Controller::Ai(Difficulty::Imago));
+        assert_eq!(w.colonies[2].controller, Controller::Ai(Difficulty::Larva));
+        assert!(w.colonies[3].defeated, "a Closed seat is not played");
+        assert!(!w.colonies[0].defeated);
+    }
+
+    #[test]
+    fn status_is_true_after_leaving_and_joining_again() {
+        let mut m = Mesh::new(2);
+        m.act(0, "go.online", "");
+        m.act(1, "go.online", "");
+        assert!(m.panels(1).contains("Not Connected"));
+        m.act(0, "online.host", "");
+        m.link(0);
+        m.act(1, "online.join", "");
+        assert!(m.panels(1).contains("Connecting"));
+        m.link(1);
+        m.run(1_000);
+        assert!(m.panels(1).contains("In Lobby"));
+        // Leave: the transport is closed and Status says so.
+        m.act(1, "lobby.leave", "");
+        assert_eq!(m.apps[1].screen, Screen::Online);
+        assert!(m.panels(1).contains("Not Connected"), "{}", m.panels(1));
+        assert_eq!(m.ops[1].last().map(String::as_str), Some("leave"));
+        m.run(500);
+        let host_seat = m.apps[0].online.lobby.as_ref().unwrap().seats()[1]
+            .kind
+            .clone();
+        assert_eq!(
+            host_seat,
+            tool_core::lockstep::SeatKind::Open,
+            "the seat is free again"
+        );
+        // Join again: Connecting, then In Lobby.
+        m.act(1, "online.join", "");
+        assert!(m.panels(1).contains("Connecting"));
+        m.link(1);
+        m.run(1_000);
+        assert!(m.panels(1).contains("In Lobby"), "{}", m.panels(1));
+        // The host leaves: the joiner is told the lobby closed.
+        m.act(0, "lobby.leave", "");
+        m.run(500);
+        assert_eq!(m.apps[1].screen, Screen::Online);
+        assert!(m.panels(1).contains("Lobby Closed"), "{}", m.panels(1));
+        // Host again; the joiner's link to the host just drops.
+        m.act(0, "online.host", "");
+        m.link(0);
+        m.act(1, "online.join", "");
+        m.link(1);
+        m.run(1_000);
+        assert!(m.panels(1).contains("In Lobby"));
+        m.unlink(0);
+        m.run(100);
+        assert!(m.panels(1).contains("Connection Lost"), "{}", m.panels(1));
+        assert_eq!(m.apps[1].screen, Screen::Online);
+    }
+
+    #[test]
+    fn rematch_online_returns_everyone_to_the_lobby_with_ready_cleared() {
+        let mut m = Mesh::new(2);
+        m.act(0, "go.online", "");
+        m.act(0, "online.host", "");
+        m.link(0);
+        m.act(1, "online.join", "");
+        m.link(1);
+        m.run(1_000);
+        m.act(1, "lobby.ready", "");
+        m.run(1_000);
+        m.act(0, "lobby.start", "");
+        m.run(2_000);
+        assert_eq!(m.apps[1].screen, Screen::Match);
+        // The joiner concedes; the host wins and sees Rematch.
+        m.apps[1]
+            .game
+            .as_mut()
+            .unwrap()
+            .issue(tool_core::world::Command::Concede);
+        m.run(2_000);
+        let end = m.ui(0)["match"]["end"].to_string();
+        assert!(end.contains("end.rematch"), "{end}");
+        let joiner_end = m.ui(1)["match"]["end"].to_string();
+        assert!(
+            !joiner_end.contains("end.rematch"),
+            "only the host has Rematch"
+        );
+        m.act(0, "end.rematch", "");
+        m.run(1_000);
+        for i in 0..2 {
+            assert_eq!(
+                m.apps[i].screen,
+                Screen::Lobby,
+                "app {i} is back in the lobby"
+            );
+        }
+        assert!(!m.panels(0).contains("Readied"), "Ready Up is cleared");
+        assert!(start_disabled(&mut m));
+        m.act(1, "lobby.ready", "");
+        m.run(1_000);
+        m.act(0, "lobby.start", "");
+        m.run(2_000);
+        for i in 0..2 {
+            assert_eq!(m.apps[i].screen, Screen::Match, "app {i} plays the rematch");
+            assert!(m.apps[i].game.as_ref().unwrap().world.winner.is_none());
+        }
+    }
+
+    #[test]
+    fn rematch_against_the_ai_keeps_settings_and_seats_on_a_new_seed() {
+        let mut a = app("me");
+        a.act("go.play_vs_ai", "", false, false);
+        a.act("pva.format", "free_for_all", false, false);
+        let panels = a.ui()["panels"].to_string();
+        for i in 1..4 {
+            assert!(
+                panels.contains(&format!("\"ai.{i}\"")),
+                "seat {i} has a Difficulty"
+            );
+        }
+        a.act("ai.2", "imago", false, false);
+        a.act("ai.3", "larva", false, false);
+        a.act("pva.seed", "77", false, false);
+        a.act("pva.start", "", false, false);
+        let first = a.game.as_ref().unwrap().world.seed;
+        a.act("end.rematch", "", false, false);
+        let w = &a.game.as_ref().unwrap().world;
+        use tool_core::settings::{Difficulty, Format};
+        use tool_core::world::Controller;
+        assert_ne!(w.seed, first, "a new seed");
+        assert_eq!(w.settings.format, Format::FreeForAll);
+        assert_eq!(w.colonies[2].controller, Controller::Ai(Difficulty::Imago));
+        assert_eq!(w.colonies[3].controller, Controller::Ai(Difficulty::Larva));
+        assert_eq!(w.tick, 0);
+        assert!(w.winner.is_none());
+    }
+
+    #[test]
+    fn the_end_screen_offers_rematch_after_a_local_match() {
+        let mut a = app("me");
+        a.act("go.play_vs_ai", "", false, false);
+        a.act("pva.start", "", false, false);
+        a.game
+            .as_mut()
+            .unwrap()
+            .issue(tool_core::world::Command::Concede);
+        for t in 1..10 {
+            a.advance(t * 200);
+        }
+        let end = a.ui()["match"]["end"].to_string();
+        assert!(end.contains("end.rematch"), "{end}");
+        a.act("end.rematch", "", false, false);
+        assert_eq!(a.screen, Screen::Match);
+        assert!(a.game.as_ref().unwrap().world.winner.is_none());
+    }
+
+    #[test]
+    fn waiting_on_names_the_player() {
+        let mut m = Mesh::new(2);
+        m.act(1, "online.name", "Bo");
+        m.act(0, "online.host", "");
+        m.link(0);
+        m.act(1, "online.join", "");
+        m.link(1);
+        m.run(1_000);
+        m.act(1, "lobby.ready", "");
+        m.run(1_000);
+        m.act(0, "lobby.start", "");
+        m.run(1_000);
+        // Bo goes quiet without leaving.
+        m.linked[1] = false;
+        for _ in 0..150 {
+            m.now += 20;
+            m.apps[0].advance(m.now);
+        }
+        let flags = m.ui(0)["match"]["hud"]["flags"].to_string();
+        assert!(flags.contains("Waiting On: Bo"), "{flags}");
+    }
+
+    #[test]
+    fn the_player_name_is_kept_in_player_settings() {
+        let mut a = app("me");
+        a.act("go.online", "", false, false);
+        a.act("online.name", "Ann\u{7}e of the Long Name", false, false);
+        assert_eq!(a.player.name, "Anne of the Long");
+        let save = a.ui()["save"]["player"].as_str().unwrap().to_string();
+        assert!(save.contains("Anne of the Long"), "{save}");
+        let b = App::new(
+            include_str!("../../../data/strings.json"),
+            include_str!("../../../data/glossary.json"),
+            "",
+            &save,
+            "x",
+        )
+        .unwrap();
+        assert_eq!(b.player.name, "Anne of the Long");
+    }
+
+    #[test]
+    fn copy_gives_the_page_the_room_code() {
+        let mut a = app("me");
+        a.act("go.online", "", false, false);
+        a.act("online.room", "abc123", false, false);
+        let p = a.ui()["panels"].to_string();
+        assert!(p.contains("\"copy\":\"ABC123\""), "{p}");
+        a.act("online.host", "", false, false);
+        let p = a.ui()["panels"].to_string();
+        assert!(p.contains("\"copy\":\"ABC123\""), "the Lobby has Copy too");
+    }
 }

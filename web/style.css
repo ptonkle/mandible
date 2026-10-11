@@ -233,3 +233,11 @@ table.pairs td:first-child { color: var(--muted); white-space: nowrap; width: 12
 [data-term] { text-decoration: underline dotted var(--muted); text-underline-offset: 3px; }
 
 #message:not(:empty) { color: var(--bad); text-align: center; }
+
+/* The Lobby's seat table (TRIAGE row 41): one row per seat. */
+table.cells { border-collapse: collapse; width: 100%; }
+table.cells th { text-align: left; color: var(--muted); font-weight: normal; padding: 0.1rem 0.5rem 0.2rem 0; }
+table.cells td { padding: 0.15rem 0.5rem 0.15rem 0; }
+table.cells select { width: 100%; }
+.button.active { background: var(--leaf); }
+.button:disabled { opacity: 0.45; cursor: default; }

@@ -73,6 +73,9 @@ pub struct PlayerSettings {
     /// (slot, key code) pairs; slots missing here use their default.
     pub keys: Vec<(String, String)>,
     pub edge_pan: bool,
+    /// Player Name, shown in the Lobby and in Waiting On; empty means the
+    /// default ("Player").
+    pub name: String,
 }
 
 impl Default for PlayerSettings {
@@ -80,6 +83,7 @@ impl Default for PlayerSettings {
         PlayerSettings {
             keys: Vec::new(),
             edge_pan: true,
+            name: String::new(),
         }
     }
 }

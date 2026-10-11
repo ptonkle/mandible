@@ -7,7 +7,7 @@
 //! `data/glossary.json`, and all of it follows GLOSSARY.md: labels and
 //! label-value pairs, not prose.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{json, Value};
 
@@ -15,8 +15,8 @@ use crate::dice::Rng;
 use crate::fixed::{Pos, CELL};
 use crate::keys::{key_label, PlayerSettings};
 use crate::lockstep::{
-    Lobby, LobbyStatus, Match, MatchStatus, Outgoing, PeerId, Seat, SeatKind as NetSeat, Target,
-    Version,
+    clean_name, Lobby, LobbyStatus, Match, MatchStatus, Outgoing, PeerId, RefuseReason, Seat,
+    SeatKind as NetSeat, Target, Version, MAX_NAME_CHARS,
 };
 use crate::render::{self, Camera, Overlay, Placing, SUB_PX};
 use crate::rules::{
@@ -26,7 +26,7 @@ use crate::settings::{
     can_disable, Biome, Difficulty, Format, GameSpeed, Level, MapType, MatchSettings, SeatKind,
     TUNNEL_MAX, TUNNEL_MIN,
 };
-use crate::world::{Amount, Command, Controller, Focus, Refusal, Work, World, HILL_REWARD};
+use crate::world::{Amount, Command, Focus, Refusal, Work, World, HILL_REWARD};
 
 /// Peers with different builds refuse each other; raise on every release
 /// that changes the simulation or the wire.
@@ -278,6 +278,9 @@ pub struct Online {
     pub codes: bool,
     /// Peers met before the host: told to the lobby once it exists.
     pub early_peers: Vec<PeerId>,
+    /// The page's transport has a session open (Host or Join pressed, not
+    /// yet left): leaving must close it.
+    pub session: bool,
 }
 
 pub struct App {
@@ -356,12 +359,17 @@ impl App {
                 status: String::new(),
                 codes: false,
                 early_peers: Vec::new(),
+                session: false,
             },
             client_id: client_id.to_string(),
             now_ms: 0,
             save: None,
             entropy: 1,
             navigate: None,
+        })
+        .map(|mut app: App| {
+            app.online.status = app.t("online.idle");
+            app
         })
     }
 
@@ -743,100 +751,169 @@ impl App {
                     ]}),
                 ]
             }
-            Screen::Online => {
-                let mut panels = vec![
-                    json!({"kind": "form", "heading": self.t("menu.online"), "items": [
-                        {"type": "input", "id": "online.room", "label": self.t("online.room_code"), "value": self.online.room},
-                        {"type": "list", "rows": [[self.t("online.status"), self.online.status]]},
-                    ]}),
-                    json!({"kind": "row", "items": [
-                        self.button("online.host", "online.host"),
-                        self.button("online.join", "online.join"),
-                        self.button("go.main_menu", "menu.back"),
-                    ]}),
-                ];
-                if self.online.codes {
-                    // The pasted-code path, behind the page's `?codes` flag.
-                    panels.push(json!({"kind": "form", "items": [
-                        {"type": "code", "id": "online.invite", "label": self.t("online.invite_code"), "value": self.online.invite},
-                        {"type": "code", "id": "online.reply", "label": self.t("online.reply_code"), "value": self.online.reply},
-                    ]}));
-                    panels.push(json!({"kind": "row", "items": [
-                        self.button("online.host_code", "online.host_by_code"),
-                        self.button("online.join_code", "online.join_by_code"),
-                        self.button("online.connect", "online.connect"),
-                    ]}));
-                }
-                panels
-            }
+            Screen::Online => self.online_panels(),
             Screen::Lobby => self.lobby_panels(),
             Screen::Match => Vec::new(),
         }
     }
 
+    fn online_panels(&self) -> Vec<Value> {
+        let mut items = vec![
+            json!({"type": "input", "id": "online.name", "label": self.t("online.name"), "value": self.player.name, "placeholder": self.t("seat.player")}),
+            json!({"type": "input", "id": "online.room", "label": self.t("online.room_code"), "value": self.online.room}),
+        ];
+        if !self.online.room.is_empty() {
+            items.push(self.copy_button(&self.online.room));
+        }
+        items.push(json!({"type": "list", "rows": [[self.t("online.status"), self.net_status()]]}));
+        let mut panels = vec![
+            json!({"kind": "form", "single": true, "heading": self.t("menu.online"), "items": items}),
+            json!({"kind": "row", "items": [
+                self.button("online.host", "online.host"),
+                self.button("online.join", "online.join"),
+                self.button("go.main_menu", "menu.back"),
+            ]}),
+        ];
+        if self.online.codes {
+            // The pasted-code path, behind the page's `?codes` flag.
+            panels.push(json!({"kind": "form", "items": [
+                {"type": "code", "id": "online.invite", "label": self.t("online.invite_code"), "value": self.online.invite},
+                {"type": "code", "id": "online.reply", "label": self.t("online.reply_code"), "value": self.online.reply},
+            ]}));
+            panels.push(json!({"kind": "row", "items": [
+                self.button("online.host_code", "online.host_by_code"),
+                self.button("online.join_code", "online.join_by_code"),
+                self.button("online.connect", "online.connect"),
+            ]}));
+        }
+        panels
+    }
+
+    /// The Copy button: the page puts `text` on the clipboard.
+    fn copy_button(&self, text: &str) -> Value {
+        json!({"type": "button", "id": "online.copy", "text": self.t("online.copy"), "copy": text})
+    }
+
+    /// Status on the Online Multiplayer screen and in the Lobby: the lobby's
+    /// own state while there is one, else the last thing that happened.
+    fn net_status(&self) -> String {
+        let Some(l) = &self.online.lobby else {
+            return self.online.status.clone();
+        };
+        match l.status() {
+            LobbyStatus::Joining | LobbyStatus::Started => self.t("online.connecting"),
+            LobbyStatus::Seated(_) => self.t("online.in_lobby"),
+            LobbyStatus::Refused(r) => self.refused_text(r),
+            LobbyStatus::Dissolved | LobbyStatus::Left => self.t("online.dissolved"),
+            LobbyStatus::Lost => self.t("online.lost"),
+        }
+    }
+
+    fn refused_text(&self, r: &RefuseReason) -> String {
+        let why = match r {
+            RefuseReason::Full => "online.full",
+            RefuseReason::WrongVersion { .. } => "online.wrong_version",
+            RefuseReason::AlreadyStarted => "online.already_started",
+        };
+        format!("{}: {}", self.t("online.refused"), self.t(why))
+    }
+
+    /// One seat's Player cell: a name, AI and its Difficulty, Open or Closed.
+    fn seat_text(&self, kind: &NetSeat) -> String {
+        match kind {
+            NetSeat::Human { name, .. } => name.clone(),
+            NetSeat::Ai { difficulty } => format!(
+                "{} {}",
+                self.t("seat.ai"),
+                self.t(&format!("difficulty.{}", net_difficulty_key(*difficulty)))
+            ),
+            NetSeat::Open => self.t("seat.open"),
+            NetSeat::Closed => self.t("seat.closed"),
+        }
+    }
+
+    /// The Lobby, after Civilization's: one row per seat (player color,
+    /// player, team, Status), the host's Match Settings beside it (read-only
+    /// for the others), and Leave, Ready Up or Start below.
     fn lobby_panels(&self) -> Vec<Value> {
         let Some(l) = &self.online.lobby else {
             return Vec::new();
         };
         let host = l.is_host();
         let settings = MatchSettings::parse(l.settings()).unwrap_or_default();
-        let mut seats = Vec::new();
+        let mut rows = Vec::new();
         for (i, seat) in l.seats().iter().enumerate() {
-            let color = self.t(&format!("color.{i}"));
-            let team = format!("{} {}", self.t("seat.team"), settings.format.team_of(i) + 1);
-            match &seat.kind {
-                NetSeat::Human { name, .. } => seats
-                    .push(json!({"type": "list", "rows": [[color, format!("{name} · {team}")]]})),
-                kind if host => {
-                    let value = match kind {
-                        NetSeat::Ai { difficulty } => format!("ai.{difficulty}"),
-                        _ => "open".into(),
-                    };
-                    let mut opts = vec![("open".to_string(), self.t("seat.open"))];
-                    for (k, d) in ["larva", "pupa", "imago"].iter().enumerate() {
-                        opts.push((
-                            format!("ai.{k}"),
-                            format!(
-                                "{} {}",
-                                self.t("seat.ai"),
-                                self.t(&format!("difficulty.{d}"))
-                            ),
-                        ));
-                    }
-                    let _ = team;
-                    seats.push(self.select(
-                        &format!("seat.{i}"),
-                        &format!("color.{i}"),
-                        opts,
-                        &value,
+            let player = if host && i != 0 && seat.client_id().is_none() {
+                // The host fills each seat without a human: Open, Closed,
+                // or an AI of any Difficulty, in every format.
+                let value = match &seat.kind {
+                    NetSeat::Ai { difficulty } => format!("ai.{difficulty}"),
+                    NetSeat::Closed => "closed".to_string(),
+                    _ => "open".to_string(),
+                };
+                let mut opts = vec![
+                    ("open".to_string(), self.t("seat.open")),
+                    ("closed".to_string(), self.t("seat.closed")),
+                ];
+                for d in 0..3u8 {
+                    opts.push((
+                        format!("ai.{d}"),
+                        self.seat_text(&NetSeat::Ai { difficulty: d }),
                     ));
                 }
-                NetSeat::Ai { difficulty } => {
-                    let d = ["larva", "pupa", "imago"]
-                        .get(*difficulty as usize)
-                        .copied()
-                        .unwrap_or("pupa");
-                    seats.push(json!({"type": "list", "rows": [[color, format!("{} {} · {team}", self.t("seat.ai"), self.t(&format!("difficulty.{d}")))]]}));
+                let mut sel = self.select(&format!("seat.{i}"), "seat.player", opts, &value);
+                sel["bare"] = json!(true);
+                sel
+            } else {
+                let mut text = self.seat_text(&seat.kind);
+                if l.status() == &LobbyStatus::Seated(i as u8) {
+                    text = format!("{text} · {}", self.t("seat.you"));
                 }
-                _ => seats.push(json!({"type": "list", "rows": [[color, self.t("seat.open")]]})),
-            }
+                json!(text)
+            };
+            let status = if i == 0 {
+                self.t("seat.host")
+            } else if seat.ready() {
+                self.t("online.readied")
+            } else {
+                String::new()
+            };
+            rows.push(json!([
+                self.t(&format!("color.{i}")),
+                player,
+                format!("{} {}", self.t("seat.team"), settings.format.team_of(i) + 1),
+                status,
+            ]));
         }
-        let status = match l.status() {
-            LobbyStatus::Joining => self.t("online.connecting"),
-            LobbyStatus::Seated(_) => self.t("online.waiting"),
-            LobbyStatus::Refused(r) => format!("{}: {:?}", self.t("online.refused"), r),
-            LobbyStatus::Dissolved => self.t("online.dissolved"),
-            LobbyStatus::Left => self.t("online.dissolved"),
-            LobbyStatus::Started => self.t("online.connecting"),
-        };
-        seats.push(json!({"type": "list", "rows": [[self.t("online.room_code"), self.online.room], [self.t("online.status"), status]]}));
+        let mut seats = vec![json!({
+            "type": "table",
+            "head": [self.t("seat.label"), self.t("seat.player"), self.t("seat.team"), self.t("online.status")],
+            "rows": rows,
+        })];
+        let mut pairs = Vec::new();
+        if !self.online.room.is_empty() {
+            pairs.push(json!([self.t("online.room_code"), self.online.room]));
+        }
+        pairs.push(json!([self.t("online.status"), self.net_status()]));
+        seats.push(json!({"type": "list", "rows": pairs}));
+        if !self.online.room.is_empty() {
+            seats.push(self.copy_button(&self.online.room));
+        }
         let mut row = vec![self.button("lobby.leave", "online.leave")];
         if host {
-            row.push(self.button("lobby.start", "menu.start"));
+            let mut start = self.button("lobby.start", "menu.start");
+            start["disabled"] = json!(!self.can_start_online());
+            row.push(start);
+        } else {
+            let mut ready = self.button("lobby.ready", "online.ready_up");
+            ready["active"] = json!(l.wants_ready());
+            ready["term"] = json!(self.t("online.ready_up"));
+            row.push(ready);
         }
         let mut panels = vec![
             json!({"kind": "form", "single": true, "heading": self.t("online.lobby"), "items": seats}),
         ];
+        panels.push(json!({"kind": "form", "heading": self.t("menu.match_settings"), "items": self.settings_fields(&settings, "lobby", host)}));
         if host && self.online.codes {
             // Pasted codes (`?codes` only): one Invite Code per joiner,
             // answered by a Reply Code.
@@ -844,12 +921,9 @@ impl App {
                 {"type": "code", "id": "online.invite", "label": self.t("online.invite_code"), "value": self.online.invite},
                 {"type": "code", "id": "online.reply", "label": self.t("online.reply_code"), "value": self.online.reply},
             ]}));
-            panels.push(json!({"kind": "row", "items": [
-                self.button("online.host_code", "online.invite_code"),
-                self.button("online.connect", "online.connect"),
-            ]}));
+            row.push(self.button("online.host_code", "online.invite_code"));
+            row.push(self.button("online.connect", "online.connect"));
         }
-        panels.push(json!({"kind": "form", "heading": self.t("menu.match_settings"), "items": self.settings_fields(&settings, "lobby", host)}));
         panels.push(json!({"kind": "row", "items": row}));
         panels
     }
@@ -902,7 +976,7 @@ impl App {
                 MatchStatus::WaitingOn(seats) => {
                     let who: Vec<String> = seats
                         .iter()
-                        .map(|s| self.t(&format!("color.{s}")))
+                        .map(|s| self.seat_name(m.seats(), *s))
                         .collect();
                     flags.push(json!({"text": format!("{}: {}", self.t("hud.waiting_on"), who.join(", "))}));
                 }
@@ -1040,6 +1114,12 @@ impl App {
                     "button": self.button("end.main_menu", "menu.main_menu"),
                 })
             };
+            if self.can_rematch(g) {
+                v["end"]["items"] = json!([
+                    self.button("end.rematch", "end.rematch"),
+                    v["end"]["button"].clone()
+                ]);
+            }
         } else if g.menu_open {
             v["menu"] = if g.confirm_concede {
                 json!({"heading": self.t("menu.concede_confirm"), "items": [self.button("menu.concede_yes", "menu.concede"), self.button("menu.resume", "menu.resume")]})
@@ -1718,6 +1798,18 @@ impl App {
                 self.screen = Screen::Online;
             }
             "lobby.start" => self.start_online(),
+            "lobby.ready" => self.lobby_ready(),
+            "end.rematch" => self.rematch(),
+            "online.name" => {
+                self.player.name = value
+                    .chars()
+                    .filter(|c| !c.is_control())
+                    .take(MAX_NAME_CHARS)
+                    .collect();
+                self.save_settings();
+            }
+            // The page copies the Room Code; nothing changes here.
+            "online.copy" => {}
             "menu.resume" => {
                 if let Some(g) = &mut self.game {
                     g.menu_open = false;
@@ -1836,6 +1928,11 @@ impl App {
             Ok(s) => s,
             Err(_) => self.fresh(),
         };
+        self.start_local_seeded(seed);
+    }
+
+    /// Play vs AI with the current settings and seats on this seed.
+    fn start_local_seeded(&mut self, seed: u64) {
         let mut settings = self.setup.clone();
         settings.biome = settings.biome.resolve(seed);
         let mut seats = vec![match self.first_seat {
@@ -2316,36 +2413,75 @@ impl App {
         Version::current(BUILD_ID)
     }
 
+    /// The Player Name for the Lobby: the one typed, or "Player".
+    fn player_name(&self) -> String {
+        let name = clean_name(&self.player.name);
+        if name.is_empty() {
+            self.t("seat.player")
+        } else {
+            name
+        }
+    }
+
     fn host_online(&mut self, request: Value) {
         self.leave_online();
         let settings = serde_json::to_string(&self.defaults).expect("serialises");
         let lobby = Lobby::host(
             App::version(),
             &self.client_id,
-            &self.t("seat.player"),
+            &self.player_name(),
             self.defaults.format.seats(),
             &settings,
             self.now_ms,
         );
         self.online.lobby = Some(lobby);
+        self.online.session = true;
         self.online.requests.push(request);
         self.screen = Screen::Lobby;
     }
 
     fn join_online(&mut self, request: Value) {
         self.leave_online();
+        self.online.session = true;
         self.online.requests.push(request);
         self.online.status = self.t("online.connecting");
     }
 
+    /// Leaves whatever online session there is (a lobby, a match, or a Join
+    /// still connecting) and resets the transport, so the next Host or Join
+    /// starts clean. Status: Not Connected.
     fn leave_online(&mut self) {
         if let Some(l) = &mut self.online.lobby {
             let out = l.leave();
             self.online.outbox.extend(out);
+        }
+        if self.online.session {
             self.online.requests.push(json!({"op": "leave"}));
         }
+        self.online.session = false;
         self.online.lobby = None;
         self.online.early_peers.clear();
+        self.online.invite.clear();
+        self.online.reply.clear();
+        self.online.status = self.t("online.idle");
+    }
+
+    /// The lobby ended without this client leaving it (refused, closed by
+    /// the host, or the link to the host lost): back to Online Multiplayer,
+    /// with Status saying why.
+    fn lobby_ended(&mut self) {
+        let ended = self.online.lobby.as_ref().is_some_and(|l| {
+            matches!(
+                l.status(),
+                LobbyStatus::Refused(_) | LobbyStatus::Dissolved | LobbyStatus::Lost
+            )
+        });
+        if ended {
+            let why = self.net_status();
+            self.leave_online();
+            self.online.status = why;
+            self.screen = Screen::Online;
+        }
     }
 
     fn lobby_seat(&mut self, rest: &str, value: &str) {
@@ -2355,6 +2491,7 @@ impl App {
         };
         let kind = match value {
             "open" => NetSeat::Open,
+            "closed" => NetSeat::Closed,
             v => match v.strip_prefix("ai.").and_then(|d| d.parse::<u8>().ok()) {
                 Some(d) => NetSeat::Ai {
                     difficulty: d.min(2),
@@ -2376,31 +2513,49 @@ impl App {
         if !apply_setting(&mut m, rest, value) {
             return;
         }
-        // The format sets the number of seats; seats beyond it close.
-        let seats = m.format.seats();
+        // The format sets the number of seats; it is refused while more
+        // humans sit in the lobby than it has seats.
+        match l.set_seat_count(m.format.seats(), now) {
+            Ok(out) => self.online.outbox.extend(out),
+            Err(_) => return,
+        }
         if let Ok(out) = l.set_settings(&serde_json::to_string(&m).expect("serialises"), now) {
             self.online.outbox.extend(out);
         }
-        for i in 0..4 {
-            let kind = if i < seats {
-                NetSeat::Open
-            } else {
-                NetSeat::Closed
-            };
-            let is_open_or_closed = l
-                .seats()
-                .get(i)
-                .map(|s| matches!(s.kind, NetSeat::Open | NetSeat::Closed))
-                .unwrap_or(false);
-            if is_open_or_closed {
-                if let Ok(out) = l.set_seat(i, kind, now) {
-                    self.online.outbox.extend(out);
-                }
+    }
+
+    /// Joiner: Ready Up, or undo it.
+    fn lobby_ready(&mut self) {
+        let now = self.now_ms;
+        if let Some(l) = &mut self.online.lobby {
+            let want = !l.wants_ready();
+            if let Ok(out) = l.set_ready(want, now) {
+                self.online.outbox.extend(out);
             }
         }
     }
 
+    /// The host may Start: every joined human has pressed Ready Up, and
+    /// seats that are not Closed make at least two teams.
+    fn can_start_online(&self) -> bool {
+        let Some(l) = &self.online.lobby else {
+            return false;
+        };
+        let m = MatchSettings::parse(l.settings()).unwrap_or_default();
+        let teams: BTreeSet<u8> = l
+            .seats()
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| s.kind != NetSeat::Closed)
+            .map(|(i, _)| m.format.team_of(i))
+            .collect();
+        l.is_host() && l.all_ready() && teams.len() >= 2
+    }
+
     fn start_online(&mut self) {
+        if !self.can_start_online() {
+            return;
+        }
         let now = self.now_ms;
         let seed = self.fresh();
         let Some(l) = &mut self.online.lobby else {
@@ -2429,11 +2584,7 @@ impl App {
             .seats
             .iter()
             .map(|s: &Seat| match s.kind {
-                NetSeat::Ai { difficulty } => SeatKind::Ai(match difficulty {
-                    0 => Difficulty::Larva,
-                    2 => Difficulty::Imago,
-                    _ => Difficulty::Pupa,
-                }),
+                NetSeat::Ai { difficulty } => SeatKind::Ai(net_difficulty(difficulty)),
                 _ => SeatKind::Human,
             })
             .collect();
@@ -2443,17 +2594,66 @@ impl App {
         let mut settings = settings;
         settings.biome = settings.biome.resolve(start.seed);
         let mut world = World::new(start.seed, settings, &seats);
-        // Seats nobody sits in (Closed) play as AI too, so the map stays fair.
+        // A Closed seat is not played: its colony is out from the first
+        // tick, alike on every client.
+        let mut closed = false;
         for (i, s) in start.seats.iter().enumerate() {
-            if matches!(s.kind, NetSeat::Closed) {
-                if let Some(c) = world.colonies.get_mut(i) {
-                    c.controller = Controller::Ai(Difficulty::Pupa);
-                }
+            if matches!(s.kind, NetSeat::Closed) && i < world.colonies.len() {
+                world.defeat(i as u8);
+                closed = true;
             }
+        }
+        if closed {
+            world.announcements.clear();
         }
         self.game = Some(Game::new(world, me, Some(m)));
         self.online.lobby = None;
         self.screen = Screen::Match;
+    }
+
+    /// Rematch is offered: after a local match, or to the host online.
+    fn can_rematch(&self, g: &Game) -> bool {
+        g.lockstep.as_ref().is_none_or(|m| m.local_seat() == 0)
+    }
+
+    /// Rematch. Play vs AI: a new match with the same settings and seats on
+    /// a new seed. Online (host): everyone back to the same Lobby, with
+    /// Ready Up cleared.
+    fn rematch(&mut self) {
+        let Some(g) = &self.game else {
+            return;
+        };
+        if !self.can_rematch(g) {
+            return;
+        }
+        match &g.lockstep {
+            None => {
+                let seed = self.fresh();
+                self.start_local_seeded(seed);
+            }
+            Some(m) => {
+                let (l, out) = Lobby::rematch(
+                    App::version(),
+                    &self.client_id,
+                    &self.player_name(),
+                    m,
+                    self.now_ms,
+                );
+                self.online.outbox.extend(out);
+                self.online.lobby = Some(l);
+                self.game = None;
+                self.screen = Screen::Lobby;
+            }
+        }
+    }
+
+    /// The name shown for a seat in Waiting On: its Player Name, or its
+    /// player color.
+    fn seat_name(&self, seats: &[Seat], seat: u8) -> String {
+        match seats.get(seat as usize).map(|s| &s.kind) {
+            Some(NetSeat::Human { name, .. }) if !name.is_empty() => name.clone(),
+            _ => self.t(&format!("color.{seat}")),
+        }
     }
 
     /// A transport event from the page: kind is "connected", "message",
@@ -2466,8 +2666,21 @@ impl App {
         }
         let now = self.now_ms;
         let peer = PeerId(peer.to_string());
+        let name = self.player_name();
         if let Some(g) = &mut self.game {
             if let Some(m) = &mut g.lockstep {
+                if kind == "message" && m.is_rematch(&peer, text) {
+                    // The host pressed Rematch: back to the same Lobby.
+                    let (mut l, out) =
+                        Lobby::rejoin(App::version(), peer.clone(), &self.client_id, &name, m, now);
+                    self.online.outbox.extend(out);
+                    let out = l.receive(&peer, text, now);
+                    self.online.outbox.extend(out);
+                    self.online.lobby = Some(l);
+                    self.game = None;
+                    self.screen = Screen::Lobby;
+                    return;
+                }
                 let out = match kind {
                     "message" => m.receive(&peer, text, now),
                     "disconnected" => {
@@ -2483,13 +2696,7 @@ impl App {
         match (&mut self.online.lobby, kind) {
             (None, "connected") if host => {
                 // Joining: the peer that announced itself as host.
-                let (mut l, out) = Lobby::join(
-                    App::version(),
-                    peer,
-                    &self.client_id,
-                    &self.t("seat.player"),
-                    now,
-                );
+                let (mut l, out) = Lobby::join(App::version(), peer, &self.client_id, &name, now);
                 self.online.outbox.extend(out);
                 for p in std::mem::take(&mut self.online.early_peers) {
                     let out = l.peer_connected(p, now);
@@ -2516,6 +2723,7 @@ impl App {
             }
             _ => {}
         }
+        self.lobby_ended();
     }
 
     /// A code for the pasted-code path, from the page's transport.
@@ -2628,6 +2836,19 @@ fn difficulty_key(d: Difficulty) -> &'static str {
         Difficulty::Larva => "larva",
         Difficulty::Pupa => "pupa",
         Difficulty::Imago => "imago",
+    }
+}
+
+/// A lobby seat's AI Difficulty (0 Larva, 1 Pupa, 2 Imago) as a word key.
+fn net_difficulty_key(d: u8) -> &'static str {
+    difficulty_key(net_difficulty(d))
+}
+
+fn net_difficulty(d: u8) -> Difficulty {
+    match d {
+        0 => Difficulty::Larva,
+        2 => Difficulty::Imago,
+        _ => Difficulty::Pupa,
     }
 }
 

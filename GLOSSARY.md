@@ -337,3 +337,15 @@ Used in code, docs and conversation only. **Never shown on screen**, and no term
 | Overlap | ★ | How far ants may push into each other. Kept small so fights stay readable. | stacking, clumping |
 | Tick | ◆ | One simulation step: 10 per second at Normal Game Speed. Used in code, docs and the Benchmark only. | frame (that is drawing), turn (that is the network's per-tick message) |
 | Turn | ◆ | A player's commands for one tick, sent to every peer in Online Multiplayer. | packet, input frame |
+
+## 14. Lobby, Player Name and Rematch (proposed 2026-10-11)
+
+Added for TRIAGE rows 37, 40, 41, 43 and 49. Shown on screen; proposed until the person sees them.
+
+| Term | Origin | Meaning | Never say |
+| --- | --- | --- | --- |
+| Player Name | ◆ | The name a person picks on the Online Multiplayer screen (at most 16 characters), kept in Player Settings. It labels their seat in the Lobby and in Waiting On. Empty shows "Player". | username, nickname, handle, gamertag |
+| Copy | ◆ | The button beside the Room Code that puts it on the clipboard. | share, clip |
+| Ready Up, Readied | ◆ | Lobby only. Ready Up is the button a joined player presses when set to play; pressing it again undoes it. A seat that pressed it is Readied, shown in the seat's Status. The host's Start is enabled only when every joined player is Readied; a change to the Match Settings clears every mark. Not the action-button state Ready. Term hint: "Press again to undo; the host can Start once every joined player is Readied." | unready, check in, confirm |
+| Rematch | ★ | End-screen button. Play vs AI: a new match with the same Match Settings and seats on a new seed. Online, the host's Rematch brings every player back to the same Lobby, with Readied cleared. | replay, play again, restart |
+| Not Connected, Connecting, In Lobby, Refused, Lobby Closed, Connection Lost | ◆ | The values of Status on the Online Multiplayer screen and in the Lobby: no online session; waiting to reach the host; seated in a lobby; the host turned you away (with the reason); the host left the lobby; the link to the host closed. | offline, waiting for players, kicked |

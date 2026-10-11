@@ -85,14 +85,58 @@ function field(item) {
   return wrap;
 }
 
+// A select with no label of its own, for a table cell.
+function bareSelect(item) {
+  const input = make("select");
+  item.options.forEach((o) => {
+    const opt = make("option", "", o.text);
+    opt.value = o.value;
+    input.append(opt);
+  });
+  input.value = item.value;
+  input.id = item.id;
+  input.addEventListener("change", () => send(item.id, input.value));
+  return input;
+}
+
+// A table with a head row; each cell is text or an item (a select, a button).
+function table(item) {
+  const box = make("table", "cells");
+  const head = make("tr");
+  item.head.forEach((h) => {
+    const th = make("th", "", h);
+    if (hints[h]) th.dataset.term = h;
+    head.append(th);
+  });
+  box.append(head);
+  item.rows.forEach((r) => {
+    const tr = make("tr");
+    r.forEach((cell) => {
+      const td = make("td");
+      if (typeof cell === "string") td.textContent = cell;
+      else td.append(cell.bare ? bareSelect(cell) : element(cell));
+      tr.append(td);
+    });
+    box.append(tr);
+  });
+  return box;
+}
+
 function element(item) {
   if (item.type === "button") {
-    const b = make("button", "button", item.text);
+    const b = make("button", "button" + (item.active ? " active" : ""), item.text);
     b.type = "button";
     b.id = item.id;
-    b.addEventListener("click", () => send(item.id, ""));
+    b.disabled = item.disabled === true;
+    if (item.term && hints[item.term]) b.dataset.term = item.term;
+    b.addEventListener("click", () => {
+      // Copy: the core gives the text; putting it on the clipboard is the page's job.
+      if (item.copy !== undefined && navigator.clipboard) navigator.clipboard.writeText(item.copy).catch(() => {});
+      send(item.id, "");
+    });
     return b;
   }
+  if (item.type === "table") return table(item);
   if (item.type === "list") return pairs(item.rows);
   if (item.type === "toggles") {
     const wrap = make("div", "field");
@@ -542,7 +586,11 @@ function refresh() {
     writeStore("player", ui.save.player);
   }
   if (ui.navigate) window.location.href = ui.navigate;
-  if (ui.net_requests) ui.net_requests.forEach(netRequest);
+  // Messages first: a Leave or Dissolve goes out before the transport closes.
+  if (ui.net_requests) {
+    flushNet();
+    ui.net_requests.forEach(netRequest);
+  }
   const inMatch = ui.screen === "match";
   const starting = inMatch && el("match").hidden;
   el("menus").hidden = inMatch;

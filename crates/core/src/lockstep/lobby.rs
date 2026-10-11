@@ -6,9 +6,24 @@
 //! request until the roster shows it. Every peer pings every connected peer.
 //! When the host starts, each seated human gets a Start, repeated by the
 //! host's [`super::Match`] until acknowledged.
+//!
+//! **Ready Up.** A joiner marks its seat ready (and may undo it), repeated
+//! until the roster shows it. The host may start only when every joined human
+//! is ready; a change to the match settings clears every mark.
+//!
+//! **Rematch.** After a match the host builds a new lobby from it
+//! ([`Lobby::rematch`]): the same seats and settings, every mark cleared, and
+//! a seat whose player has gone made Open. Its roster reaches each joiner while
+//! it is still in the old match ([`super::Match::is_rematch`]), and the joiner
+//! comes back with [`Lobby::rejoin`]. Each Rematch starts a new round. Old
+//! messages (old-lobby pings, old-match turns) may still be in flight, and a
+//! peer may not even be known yet, so after a rematch a peer's match messages
+//! are kept only once a ping of the new round has come from it: on an
+//! ordered channel that ping follows everything the peer sent before.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
+use super::game::Match;
 use super::rtt::RttWindow;
 use super::wire::{Msg, Outgoing, PeerId, RefuseReason, Seat, SeatKind, Version};
 
@@ -20,6 +35,22 @@ const ROSTER_EVERY_MS: i64 = 1000;
 const PING_EVERY_MS: i64 = 500;
 /// The most seats a lobby has.
 const MAX_SEATS: usize = 4;
+/// The longest player name, in characters.
+pub const MAX_NAME_CHARS: usize = 16;
+
+/// A player name as the lobby shows it: printable, trimmed, at most
+/// [`MAX_NAME_CHARS`] characters. Empty means "no name given".
+pub fn clean_name(name: &str) -> String {
+    name.chars()
+        .filter(|c| !c.is_control())
+        .collect::<String>()
+        .trim()
+        .chars()
+        .take(MAX_NAME_CHARS)
+        .collect::<String>()
+        .trim()
+        .to_string()
+}
 
 /// What the lobby is doing, for the caller to show.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -32,6 +63,8 @@ pub enum LobbyStatus {
     Refused(RefuseReason),
     /// The host left before the start; the lobby is gone.
     Dissolved,
+    /// A joiner's link to the host closed without the host leaving.
+    Lost,
     /// This client left.
     Left,
     /// The match has started; [`Lobby::take_start`] gives what the match needs.
@@ -53,6 +86,8 @@ pub enum LobbyError {
     NotAllowed,
     /// The lobby is not open (not seated, or already started).
     NotOpen,
+    /// A joined human has not pressed Ready Up.
+    NotReady,
 }
 
 /// Everything a [`super::Match`] needs, produced when the match starts.
@@ -72,6 +107,11 @@ pub struct MatchStart {
     pub early: Vec<(PeerId, String)>,
     /// Host only: the Start text and the seats still to acknowledge it.
     pub start_resend: Option<(String, BTreeMap<u8, PeerId>)>,
+    /// The round (0 for a first lobby, one more for each Rematch).
+    pub round: u32,
+    /// Peers that have sent a ping of this round. After a rematch, match
+    /// messages from any other peer are old and are thrown away.
+    pub heard: BTreeSet<PeerId>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -98,8 +138,12 @@ pub struct Lobby {
     last_ping_ms: i64,
     last_team_ms: i64,
     wanted_team: Option<u8>,
+    last_ready_ms: i64,
+    wanted_ready: Option<bool>,
     start: Option<MatchStart>,
     early: Vec<(PeerId, String)>,
+    round: u32,
+    heard: BTreeSet<PeerId>,
 }
 
 impl Lobby {
@@ -119,8 +163,12 @@ impl Lobby {
             last_ping_ms: now_ms - PING_EVERY_MS,
             last_team_ms: now_ms,
             wanted_team: None,
+            last_ready_ms: now_ms,
+            wanted_ready: None,
             start: None,
             early: Vec::new(),
+            round: 0,
+            heard: BTreeSet::new(),
         }
     }
 
@@ -145,6 +193,7 @@ impl Lobby {
         lobby.seats[0].kind = SeatKind::Human {
             client_id: client_id.to_string(),
             name: name.to_string(),
+            ready: false,
         };
         lobby.settings = settings.to_string();
         lobby.roster_version = 1;
@@ -167,6 +216,66 @@ impl Lobby {
         (lobby, vec![Outgoing::to_peer(&host, &hello)])
     }
 
+    /// Host, after a match: the same seats and settings for a rematch. Every
+    /// Ready Up mark is cleared, a human seat whose player has gone becomes
+    /// Open, and the roster goes to everyone still connected.
+    pub fn rematch(
+        version: Version,
+        client_id: &str,
+        name: &str,
+        game: &Match,
+        now_ms: i64,
+    ) -> (Lobby, Vec<Outgoing>) {
+        let mut lobby = Lobby::blank(version, client_id, name, now_ms);
+        lobby.settings = game.settings().to_string();
+        lobby.seats = game.seats().to_vec();
+        for (i, seat) in lobby.seats.iter_mut().enumerate() {
+            if let SeatKind::Human { ready, .. } = &mut seat.kind {
+                *ready = false;
+                if i != 0 && !game.present(i as u8) {
+                    seat.kind = SeatKind::Open;
+                }
+            }
+        }
+        lobby.seats[0].kind = SeatKind::Human {
+            client_id: client_id.to_string(),
+            name: name.to_string(),
+            ready: false,
+        };
+        lobby.adopt_peers(game);
+        lobby.status = LobbyStatus::Seated(0);
+        let out = lobby.roster_changed(now_ms);
+        (lobby, out)
+    }
+
+    /// Joiner, still in the old match, on the host's rematch roster: joins
+    /// the new lobby. The caller passes that roster to [`Lobby::receive`].
+    pub fn rejoin(
+        version: Version,
+        host: PeerId,
+        client_id: &str,
+        name: &str,
+        game: &Match,
+        now_ms: i64,
+    ) -> (Lobby, Vec<Outgoing>) {
+        let (mut lobby, out) = Lobby::join(version, host, client_id, name, now_ms);
+        lobby.adopt_peers(game);
+        (lobby, out)
+    }
+
+    /// Knows the old match's peers, and starts the next round.
+    fn adopt_peers(&mut self, game: &Match) {
+        self.round = game.round() + 1;
+        for (peer, seat) in game.peer_seats() {
+            let client_id = game
+                .seats()
+                .get(*seat as usize)
+                .and_then(|s| s.client_id())
+                .map(str::to_string);
+            self.peers.entry(peer.clone()).or_default().client_id = client_id;
+        }
+    }
+
     fn hello(&self) -> Msg {
         Msg::Hello {
             proto: self.version.proto,
@@ -181,6 +290,7 @@ impl Lobby {
             version: self.roster_version,
             seats: self.seats.clone(),
             settings: self.settings.clone(),
+            round: self.round,
         }
     }
 
@@ -208,6 +318,15 @@ impl Lobby {
     /// What the lobby is doing.
     pub fn status(&self) -> &LobbyStatus {
         &self.status
+    }
+
+    /// True when every joined human has pressed Ready Up (the host's own
+    /// seat needs no mark).
+    pub fn all_ready(&self) -> bool {
+        self.seats
+            .iter()
+            .enumerate()
+            .all(|(i, s)| i == 0 || s.client_id().is_none() || s.ready())
     }
 
     /// The 90th-percentile round trip to a peer, in milliseconds.
@@ -246,7 +365,7 @@ impl Lobby {
     pub fn peer_disconnected(&mut self, peer: &PeerId, now_ms: i64) -> Vec<Outgoing> {
         if self.host_peer.as_ref() == Some(peer) {
             if self.open() {
-                self.status = LobbyStatus::Dissolved;
+                self.status = LobbyStatus::Lost;
             }
             return Vec::new();
         }
@@ -286,6 +405,53 @@ impl Lobby {
         Ok(self.roster_changed(now_ms))
     }
 
+    /// Host: sets how many seats the lobby has (1..=4), as the format asks.
+    /// New seats are Open; a human in a seat that goes moves to the first
+    /// seat without a human. Refused when there are more humans than seats.
+    pub fn set_seat_count(
+        &mut self,
+        count: usize,
+        now_ms: i64,
+    ) -> Result<Vec<Outgoing>, LobbyError> {
+        if !self.is_host() {
+            return Err(LobbyError::NotHost);
+        }
+        if !self.open() {
+            return Err(LobbyError::NotOpen);
+        }
+        let count = count.clamp(1, MAX_SEATS);
+        if count == self.seats.len() {
+            return Ok(Vec::new());
+        }
+        let humans = self
+            .seats
+            .iter()
+            .filter(|s| s.client_id().is_some())
+            .count();
+        if humans > count {
+            return Err(LobbyError::SeatTaken);
+        }
+        while self.seats.len() < count {
+            let team = self.seats.len() as u8;
+            self.seats.push(Seat {
+                kind: SeatKind::Open,
+                team,
+            });
+        }
+        let moving: Vec<SeatKind> = self.seats[count..]
+            .iter()
+            .filter(|s| s.client_id().is_some())
+            .map(|s| s.kind.clone())
+            .collect();
+        self.seats.truncate(count);
+        for kind in moving {
+            if let Some(free) = self.seats.iter_mut().find(|s| s.client_id().is_none()) {
+                free.kind = kind;
+            }
+        }
+        Ok(self.roster_changed(now_ms))
+    }
+
     /// Host: sets any seat's team, its own included.
     pub fn set_team(
         &mut self,
@@ -317,6 +483,12 @@ impl Lobby {
             return Err(LobbyError::NotOpen);
         }
         self.settings = settings.to_string();
+        // New settings: every joiner looks again before Ready Up.
+        for seat in &mut self.seats {
+            if let SeatKind::Human { ready, .. } = &mut seat.kind {
+                *ready = false;
+            }
+        }
         Ok(self.roster_changed(now_ms))
     }
 
@@ -346,6 +518,31 @@ impl Lobby {
         self.wanted_team = Some(team);
         self.last_team_ms = now_ms;
         Ok(vec![Outgoing::to_peer(&host, &Msg::TeamRequest { team })])
+    }
+
+    /// Joiner: presses Ready Up (`true`) or undoes it. Repeated until the
+    /// roster shows it.
+    pub fn set_ready(&mut self, ready: bool, now_ms: i64) -> Result<Vec<Outgoing>, LobbyError> {
+        let host = self.host_peer.clone().ok_or(LobbyError::NotAllowed)?;
+        if !matches!(self.status, LobbyStatus::Seated(_)) {
+            return Err(LobbyError::NotOpen);
+        }
+        self.wanted_ready = Some(ready);
+        self.last_ready_ms = now_ms;
+        Ok(vec![Outgoing::to_peer(&host, &Msg::Ready { ready })])
+    }
+
+    /// This client's own seat has pressed Ready Up, as the roster shows.
+    pub fn is_ready(&self) -> bool {
+        match self.status {
+            LobbyStatus::Seated(i) => self.seats.get(i as usize).is_some_and(|s| s.ready()),
+            _ => false,
+        }
+    }
+
+    /// Ready Up as this joiner last asked for it, before the roster shows it.
+    pub fn wants_ready(&self) -> bool {
+        self.wanted_ready.unwrap_or_else(|| self.is_ready())
     }
 
     /// Leaves the lobby. On the host this dissolves it for everyone.
@@ -378,6 +575,9 @@ impl Lobby {
         }
         if self.status != LobbyStatus::Seated(0) {
             return Err(LobbyError::NotOpen);
+        }
+        if !self.all_ready() {
+            return Err(LobbyError::NotReady);
         }
         let msg = Msg::Start {
             seed,
@@ -415,6 +615,8 @@ impl Lobby {
             rtt: self.rtts(),
             early: std::mem::take(&mut self.early),
             start_resend: Some((text, pending)),
+            round: self.round,
+            heard: self.heard.clone(),
         });
         self.status = LobbyStatus::Started;
         Ok(out)
@@ -453,6 +655,14 @@ impl Lobby {
                         out.push(Outgoing::to_peer(&host, &Msg::TeamRequest { team }));
                     }
                 }
+                if let Some(ready) = self.wanted_ready {
+                    if self.is_ready() == ready {
+                        self.wanted_ready = None;
+                    } else if now_ms - self.last_ready_ms >= RETRY_MS {
+                        self.last_ready_ms = now_ms;
+                        out.push(Outgoing::to_peer(&host, &Msg::Ready { ready }));
+                    }
+                }
             }
         }
         if now_ms - self.last_ping_ms >= PING_EVERY_MS {
@@ -460,6 +670,7 @@ impl Lobby {
             out.push(Outgoing::to_all(&Msg::Ping {
                 client_id: self.client_id.clone(),
                 stamp: now_ms,
+                round: self.round,
             }));
         }
         out
@@ -471,13 +682,23 @@ impl Lobby {
             return Vec::new();
         };
         if msg.is_match_kind() {
-            if self.open() {
+            // After a rematch, a peer not heard in this round may still be
+            // sending the old match.
+            let fresh = self.round == 0 || self.heard.contains(peer);
+            if self.open() && fresh {
                 self.early.push((peer.clone(), text.to_string()));
             }
             return Vec::new();
         }
         match msg {
-            Msg::Ping { client_id, stamp } => {
+            Msg::Ping {
+                client_id,
+                stamp,
+                round,
+            } => {
+                if round == self.round {
+                    self.heard.insert(peer.clone());
+                }
                 self.peers.entry(peer.clone()).or_default().client_id = Some(client_id);
                 vec![Outgoing::to_peer(peer, &Msg::Pong { stamp })]
             }
@@ -529,7 +750,11 @@ impl Lobby {
                 }
                 match self.seats.iter().position(|s| s.kind == SeatKind::Open) {
                     Some(i) => {
-                        self.seats[i].kind = SeatKind::Human { client_id, name };
+                        self.seats[i].kind = SeatKind::Human {
+                            client_id,
+                            name: clean_name(&name),
+                            ready: false,
+                        };
                         self.roster_changed(now_ms)
                     }
                     None => {
@@ -550,6 +775,20 @@ impl Lobby {
                     _ => Vec::new(),
                 }
             }
+            Msg::Ready { ready } => {
+                if !self.open() {
+                    return Vec::new();
+                }
+                match self.seat_of_peer(peer) {
+                    Some(i) if i != 0 && self.seats[i].ready() != ready => {
+                        if let SeatKind::Human { ready: r, .. } = &mut self.seats[i].kind {
+                            *r = ready;
+                        }
+                        self.roster_changed(now_ms)
+                    }
+                    _ => Vec::new(),
+                }
+            }
             Msg::Leave => self.free_seat_of(peer, now_ms),
             _ => Vec::new(),
         }
@@ -561,9 +800,16 @@ impl Lobby {
                 version,
                 seats,
                 settings,
+                round,
             } => {
                 if !self.open() || version <= self.roster_version {
                     return Vec::new();
+                }
+                // A newcomer to a rematch lobby learns its round here.
+                if round != self.round {
+                    self.round = round;
+                    self.heard.clear();
+                    self.heard.insert(host.clone());
                 }
                 self.roster_version = version;
                 self.seats = seats;
@@ -629,6 +875,8 @@ impl Lobby {
                     rtt: self.rtts(),
                     early: std::mem::take(&mut self.early),
                     start_resend: None,
+                    round: self.round,
+                    heard: self.heard.clone(),
                 });
                 self.status = LobbyStatus::Started;
                 ack
