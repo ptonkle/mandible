@@ -72,6 +72,7 @@ How to read the tables:
 | Join, Connect, Leave | ◆ | Online actions: Join a room, Connect after pasting codes, Leave a lobby. | enter, link up, quit (in the lobby) |
 | Seat | ◆ | One place in a match, shown by its player color. | slot, spot, position |
 | You | ◆ | The local player's seat. | me, player 1 |
+| Spectate, Spectating | ◆ | Watching a match in which no seat is You: in Play vs AI, seat 1 (Red) is set to an AI. There is no action grid; the whole map is shown, or one colony's Fog of War at a time. "Spectating" is the top-bar flag. | observe, observer, watch mode |
 | Open, Closed | ◆ | Lobby seat states: Open waits for a player; Closed is not played. An Open seat at Start is filled by a Pupa AI. | empty, locked (that is the tier gate) |
 | Red, Blue, Yellow, White | ◆ | The player colors of seats 1–4, chosen to be easy to tell apart on every biome. | orange, purple, team color |
 
@@ -234,8 +235,9 @@ Rejected names. Do not reuse them without passing the naming test.
 | --- | --- | --- | --- |
 | Action | ★ | Anything the player can do from the action grid: train, place, upgrade, evolve, retreat. | ability, command, order, spell |
 | Waypoint | ★ | A map point where every ant of one species goes. A species can have several. | rally point, flag, marker, target, move order |
-| All Ants | ★ | The Waypoints-tab button that sets one waypoint for every combat species at once, replacing theirs. | everyone, all units, army |
-| Set Waypoint | ★ | Place a waypoint for a species. | order, command, send |
+| All Ants, ALL | ★ | The Waypoints-tab button that sets one waypoint for every combat species at once, replacing theirs. The button shows its short form, "ALL", in place of a picture. | everyone, all units, army |
+| Set Waypoint | ★ | Place a waypoint for a species with a plain click, replacing its waypoints. | order, command, send |
+| Add Waypoint | ◆ | Shift + click with a Waypoints button: place one more waypoint for the species (up to 4), keeping its others, and stay in waypoint mode. | append, queue waypoint |
 | Clear Waypoint | ★ | Remove one waypoint (right-click it). | delete, cancel, remove |
 | Split | ★ | How a species shares itself evenly between its waypoints. | spread, divide |
 | Train | ★ | Pay for and produce one ant, from anywhere, without visiting a queen. | build (that is for blueprints), make, spawn, hatch, recruit |
@@ -245,6 +247,7 @@ Rejected names. Do not reuse them without passing the naming test.
 | Queue Bar | ★ | The row of icons beside the resource counts that shows the queue. | production bar, build queue |
 | Cancel | ◆ | Remove an item from the queue and get its resources back. | delete, dequeue |
 | Retreat | ★ | A toggle. While on, every ant except Gatherers and Builders pulls back towards its colony's nests. | recall, fall back, return, regroup |
+| Auto-Scout | ◆ | A toggle on the Colony tab. While on, one combat ant, chosen by the simulation, explores by itself: unexplored chambers nearest first, then chambers out of sight. Shown Active while on. | auto-explore, scout mode |
 | Gather Focus | ◆ | Which resource Harvester Ants favour: Balanced (Food 2 : Nectar 1 : Leaves 1), or Food, Nectar or Leaves (3 : 1 : 1 toward it). | priority, eco setting, worker split |
 | Balanced | ◆ | The default Gather Focus. | even, default |
 | Placement Blocked | ◆ | Notice: the blueprint cannot go there (rock, another structure, a node, not explored, or too far from a queen). | invalid placement, can't build here |
@@ -264,6 +267,7 @@ Rejected names. Do not reuse them without passing the naming test.
 | Benchmark | ★ | The Player Settings button that runs the performance-test scenario live, with its budget. | perf test, stress test |
 | Frames per second, Tick average, Tick worst, Draw average, Budget, Measuring, Within budget, Over budget | ◆ | The Benchmark panel's labels and states: drawing rate; simulation time per tick (average and worst); drawing time per frame; the budget (tick under 8 ms, 60 frames per second); and whether the run is inside it. | FPS, lag, performance score |
 | Hotkey | ★ | The key that triggers an action button. It follows the button's position on the keyboard. | shortcut, keybind (that is the setting), key |
+| Click | ◆ | A left mouse click; "Shift Click" is a click with Shift held. Used in Hotkey rows of tooltips. | tap |
 | Keybinds | ★ | The Player Settings screen where hotkeys are remapped. | controls, key mapping |
 | Resource Bar | ◆ | The top display of Food, Nectar and Leaves, each with its income, plus population. | HUD, resource panel |
 | Minimap | ◆ | The small overview of the map, if added. | radar, map (alone) |
@@ -291,6 +295,7 @@ Rejected names. Do not reuse them without passing the naming test.
 | Hill | ◆ | Event: a zone that rewards the colony holding it. "Hold the Hill." | king of the hill, capture point, objective, KOTH |
 | Holding | ◆ | Having ants in the hill with no enemy ants there. | capturing, controlling, owning |
 | Contested | ◆ | The hill has ants from more than one team in it. | disputed, blocked |
+| Reward | ◆ | What a Hill pays the team that wins it, as label–value text: "Reward: 300 Food · 150 Nectar · 150 Leaves". | prize, loot |
 
 ## 12. Menus and settings
 
@@ -313,6 +318,10 @@ Rejected names. Do not reuse them without passing the naming test.
 | Events | ★ | The Match Setting that turns Windfalls and Hills on or off. | random events |
 | Resource Density | ★ | A match setting for how much each node holds and how many nodes there are. | richness, abundance |
 | Starting Resources | ★ | A match setting: the stockpile each colony begins with. | starting bank, initial resources |
+| Map Revealed | ★ | A Match Setting, On or Off: every colony starts with every cell Explored, so the map's shape (rock, dirt, tunnels, chambers) and its nodes show from the first tick. Nothing is Visible until it is in Line of Sight. The word "Revealed" is used only in this name; a cell in sight is Visible. | map hack, full map |
+| Sandbox | ★ | A Match Setting, On or Off, for trying things out: human colonies have unlimited resources and start at Tier 3. A local Sandbox match also offers Pause and Time Scale. | creative mode, cheat mode, test mode |
+| Pause, Paused, Time Scale | ◆ | Local time controls, only in a Sandbox match or while spectating, never online: Pause stops time (the top bar shows "Paused"); Time Scale runs it at ×½, ×1, ×2 or ×4 of the Game Speed. | freeze, fast-forward, game speed (that is the match setting) |
+| ×½, ×1, ×2, ×4 | ◆ | The values of Time Scale. | half speed, double speed |
 | Campaign | ★ | Story mode. Later, not in the first version. | story, missions |
 | Civilization | ★ | Later: a colony type with unique species, bonuses and upgrades. The name is still to be chosen; "Civilization" is a placeholder. | faction, race |
 

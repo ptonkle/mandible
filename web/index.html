@@ -25,6 +25,7 @@
       <div id="resources" class="resources"></div>
       <div id="queue" class="queue"></div>
       <div id="flags" class="flags"></div>
+      <div id="controls" class="controls"></div>
       <div id="clock" class="clock"></div>
     </header>
     <div id="notices" class="notices" aria-live="polite"></div>
@@ -41,9 +42,23 @@
 
   <template id="leaf-template">
     <button class="leaf" type="button">
-      <svg class="leaf-shape" viewBox="0 0 200 80" aria-hidden="true">
-        <path d="M6 40 C 40 2, 150 2, 194 40 C 150 78, 40 78, 6 40 Z"/>
-        <path class="vein" d="M10 40 L 190 40 M 60 40 L 80 20 M 60 40 L 80 60 M 110 40 L 130 18 M 110 40 L 130 62 M 150 40 L 166 26 M 150 40 L 166 54"/>
+      <!-- Four kinds of leaf; CSS shows one per main-menu button, in order:
+           oak (lobed), maple (pointed), willow (a long blade), lily pad (round). -->
+      <svg class="leaf-shape oak" viewBox="0 0 200 80" aria-hidden="true">
+        <path d="M6 40 C 14 30, 26 34, 32 24 C 38 12, 52 22, 60 14 C 70 4, 82 18, 94 10 C 106 2, 118 18, 130 10 C 142 4, 152 20, 164 16 C 178 14, 188 28, 194 40 C 188 52, 178 66, 164 64 C 152 60, 142 76, 130 70 C 118 62, 106 78, 94 70 C 82 62, 70 76, 60 66 C 52 58, 38 68, 32 56 C 26 46, 14 50, 6 40 Z"/>
+        <path class="vein" d="M10 40 L 190 40 M 46 40 L 60 18 M 46 40 L 60 62 M 80 40 L 94 14 M 80 40 L 94 66 M 116 40 L 130 14 M 116 40 L 130 66 M 150 40 L 164 20 M 150 40 L 164 60"/>
+      </svg>
+      <svg class="leaf-shape maple" viewBox="0 0 200 80" aria-hidden="true">
+        <path d="M6 40 L 44 34 L 32 10 L 66 24 L 74 2 L 98 22 L 128 4 L 128 28 L 160 18 L 150 34 L 194 40 L 150 46 L 160 62 L 128 52 L 128 76 L 98 58 L 74 78 L 66 56 L 32 70 L 44 46 Z"/>
+        <path class="vein" d="M8 40 L 186 40 M 52 40 L 34 12 M 52 40 L 34 68 M 86 40 L 74 6 M 86 40 L 74 74 M 112 40 L 128 8 M 112 40 L 128 72 M 140 40 L 158 20 M 140 40 L 158 60"/>
+      </svg>
+      <svg class="leaf-shape willow" viewBox="0 0 200 80" aria-hidden="true">
+        <path d="M2 44 C 40 18, 130 16, 198 30 C 140 44, 50 64, 2 44 Z"/>
+        <path class="vein" d="M6 44 C 60 36, 130 32, 194 30 M 60 38 L 74 28 M 100 35 L 116 25 M 140 32 L 154 26 M 80 37 L 92 46 M 120 33 L 134 40"/>
+      </svg>
+      <svg class="leaf-shape lily" viewBox="0 0 200 80" aria-hidden="true">
+        <path d="M100 40 L 188 28 A 92 37 0 1 0 188 52 Z"/>
+        <path class="vein" d="M100 40 L 12 40 M 100 40 L 36 12 M 100 40 L 36 68 M 100 40 L 100 5 M 100 40 L 100 75 M 100 40 L 156 9 M 100 40 L 156 71"/>
       </svg>
       <svg class="ant" viewBox="0 0 60 30" aria-hidden="true">
         <ellipse cx="12" cy="15" rx="10" ry="7"/>

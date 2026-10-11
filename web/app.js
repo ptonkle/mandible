@@ -154,92 +154,173 @@ function drawMenus() {
 }
 
 // ---- the match ----
+// The view model changes every tick, so the HUD is updated in place: each
+// element is kept while its key stays, and only its text, classes and
+// picture change. A button under the pointer is never replaced, so clicks
+// and hover (tooltips) survive the updates.
+
+function setText(node, text) {
+  if (node.textContent !== text) node.textContent = text;
+}
+
+function setClass(node, cls) {
+  if (node.className !== cls) node.className = cls;
+}
+
+function setTerm(node, term) {
+  if (term && hints[term]) node.dataset.term = term;
+  else delete node.dataset.term;
+}
+
+// One child of `box` per item, in order. `create` makes a new child;
+// `update` brings it up to date. Listeners read `node.item`, the latest item.
+function sync(box, items, keyOf, create, update) {
+  const old = new Map();
+  Array.from(box.children).forEach((c) => old.set(c.dataset.key, c));
+  items.forEach((item, i) => {
+    const key = keyOf(item, i);
+    let node = old.get(key);
+    if (node) {
+      old.delete(key);
+    } else {
+      node = create();
+      node.dataset.key = key;
+    }
+    node.item = item;
+    update(node, item);
+    if (box.children[i] !== node) box.insertBefore(node, box.children[i] || null);
+  });
+  old.forEach((node) => node.remove());
+}
+
+const byIndex = (item, i) => String(i);
+
+function setIcon(img, key) {
+  const src = icons[key] || "";
+  if (img.getAttribute("src") !== src) {
+    if (src) img.src = src;
+    else img.removeAttribute("src");
+  }
+  img.hidden = !src;
+}
+
+function newRes() {
+  const box = make("div", "res");
+  box.append(make("span", "name"), make("span", "value"), make("span", "income"));
+  return box;
+}
 
 function drawBar(m) {
-  const res = el("resources");
-  res.replaceChildren();
-  m.hud.resources.forEach((r) => {
-    const box = make("div", "res " + r.key);
-    const income = make("span", "income", r.income);
-    income.dataset.term = r.term;
-    box.append(make("span", "name", r.label), make("span", "value", r.value), income);
-    res.append(box);
+  sync(el("resources"), m.hud.resources.concat(m.hud.stats), (r) => r.key, newRes, (box, r) => {
+    setClass(box, "res " + r.key);
+    const [name, value, income] = box.children;
+    setText(name, r.label);
+    setText(value, r.value);
+    setText(income, r.income || "");
+    if (r.income) {
+      setTerm(income, r.term);
+      setTerm(name, "");
+    } else {
+      setTerm(name, r.term);
+      setTerm(income, "");
+    }
   });
-  [m.hud.population, m.hud.tier].forEach((p) => {
-    const box = make("div", "res");
-    const name = make("span", "name", p.label);
-    if (hints[p.term]) name.dataset.term = p.term;
-    box.append(name, make("span", "value", p.value));
-    res.append(box);
-  });
-  const queue = el("queue");
-  queue.replaceChildren();
-  m.queue.forEach((q) => {
-    const item = make("button", "qitem");
-    item.type = "button";
-    item.append(iconImage(q.icon));
-    const fill = make("span", "fill");
+  sync(el("queue"), m.queue, (q) => q.key, newQueueItem, (item, q) => {
+    const [img, count, fill] = item.children;
+    setIcon(img, q.icon);
+    setText(count, q.count);
     fill.style.width = q.progress;
-    item.append(fill);
-    item.addEventListener("click", () => send(q.id, ""));
-    item.addEventListener("mouseenter", () => showTip(q.label, q.rows, item));
-    item.addEventListener("mouseleave", hideTip);
-    queue.append(item);
+    if (tipAnchor === item) showTip(q.label, q.rows, item);
   });
-  const flags = el("flags");
-  flags.replaceChildren();
-  m.hud.flags.forEach((f) => {
-    const flag = make("span", "flag", f.text);
-    if (f.term && hints[f.term]) flag.dataset.term = f.term;
-    flags.append(flag);
+  sync(el("flags"), m.hud.flags, byIndex, () => make("span", "flag"), (flag, f) => {
+    setText(flag, f.text);
+    setTerm(flag, f.term);
   });
-  el("clock").textContent = m.hud.clock;
-  const notices = el("notices");
-  notices.replaceChildren();
-  m.notices.forEach((n) => notices.append(make("div", "notice", n.text)));
+  sync(el("controls"), m.controls, (c) => c.id, newControl, (b, c) => {
+    setText(b, c.text);
+    setClass(b, "control" + (c.active ? " active" : ""));
+  });
+  setText(el("clock"), m.hud.clock);
+  sync(el("notices"), m.notices, byIndex, () => make("div", "notice"), (n, v) => setText(n, v.text));
+}
+
+function newQueueItem() {
+  const item = make("button", "qitem");
+  item.type = "button";
+  item.append(iconImage(""), make("span", "count"), make("span", "fill"));
+  item.addEventListener("click", () => send(item.item.id, ""));
+  item.addEventListener("mouseenter", () => showTip(item.item.label, item.item.rows, item));
+  item.addEventListener("mouseleave", hideTip);
+  return item;
+}
+
+function newControl() {
+  const b = make("button", "control");
+  b.type = "button";
+  b.addEventListener("click", () => send(b.item.id, ""));
+  return b;
+}
+
+function newTab() {
+  const b = make("button", "tab");
+  b.type = "button";
+  b.append(make("span", "name"), make("span", "k"));
+  b.addEventListener("click", () => send(b.item.id, ""));
+  return b;
+}
+
+function newGridButton() {
+  const b = make("button", "gbtn");
+  b.type = "button";
+  b.append(iconImage(""), make("span", "icon-text"), make("span", "label"), make("span", "k"), make("span", "tier"));
+  b.addEventListener("click", (e) => {
+    if (!b.item.empty) sendMods(b.item.id, e);
+  });
+  b.addEventListener("mouseenter", () => {
+    if (!b.item.empty) showTip(b.item.label, tipRows(b.item), b);
+  });
+  b.addEventListener("mouseleave", hideTip);
+  return b;
+}
+
+function tipRows(g) {
+  return g.rows.concat([["", g.state_text]]);
 }
 
 function drawGrid(m) {
-  const tabs = el("tabs");
-  tabs.replaceChildren();
-  m.tabs.forEach((t) => {
-    const b = make("button", "tab" + (t.active ? " active" : ""), t.label);
-    b.type = "button";
-    b.append(make("span", "k", t.key));
-    b.addEventListener("click", () => send(t.id, ""));
-    tabs.append(b);
+  el("grid").hidden = m.spectate;
+  sync(el("tabs"), m.tabs, (t) => t.id, newTab, (b, t) => {
+    setClass(b, "tab" + (t.active ? " active" : ""));
+    setText(b.children[0], t.label);
+    setText(b.children[1], t.key);
   });
-  const buttons = el("buttons");
-  buttons.replaceChildren();
-  m.grid.forEach((g) => {
-    const b = make("button", "gbtn");
-    b.type = "button";
+  sync(el("buttons"), m.grid, (g) => g.id, newGridButton, (b, g) => {
+    const [img, iconText, label, key, tier] = b.children;
     if (g.empty) {
-      b.classList.add("empty");
-    } else {
-      b.classList.add(g.state);
-      if (g.active) b.classList.add("active");
-      b.append(iconImage(g.icon), make("span", "label", g.label), make("span", "k", g.key));
-      b.addEventListener("click", (e) => sendMods(g.id, e));
-      b.addEventListener("mouseenter", () => {
-        hovered = g.id;
-        showTip(g.label, g.rows.concat([["", g.state_text]]), b);
-      });
-      b.addEventListener("mouseleave", () => {
-        hovered = null;
-        hideTip();
-      });
-      if (hovered === g.id) showTip(g.label, g.rows.concat([["", g.state_text]]), b);
+      setClass(b, "gbtn empty");
+      if (tipAnchor === b) hideTip();
+      return;
     }
-    buttons.append(b);
+    setClass(b, "gbtn " + g.state + (g.active ? " active" : ""));
+    setIcon(img, g.icon);
+    setText(iconText, g.icon_text);
+    setText(label, g.label);
+    setText(key, g.key);
+    setText(tier, g.tier);
+    if (tipAnchor === b) showTip(g.label, tipRows(g), b);
   });
 }
+
+let overlayText = "";
 
 function drawOverlay(m) {
   const overlay = el("overlay");
   const box = m.end || m.menu;
   overlay.hidden = !box;
-  if (!box) return;
+  // Rebuilt only when it changes, so its buttons stay under the pointer.
+  const text = box ? JSON.stringify(box) : "";
+  if (!box || text === overlayText) return;
+  overlayText = text;
   overlay.replaceChildren();
   const panel = make("div", "panel");
   if (box.title) panel.append(make("h2", "", box.title));
@@ -252,21 +333,35 @@ function drawOverlay(m) {
 
 // ---- tooltips and term hints ----
 
+// Above the anchor when there is room, else below it; always inside the
+// window at the sides.
 function place(box, anchor) {
   const r = anchor.getBoundingClientRect();
-  box.style.left = r.left + "px";
-  box.style.top = r.top + "px";
-  box.style.transform = "translateY(-100%)";
+  const w = box.offsetWidth;
+  const h = box.offsetHeight;
+  let top = r.top - h;
+  if (top < 0) top = r.bottom;
+  if (top + h > window.innerHeight) top = window.innerHeight - h;
+  if (top < 0) top = 0;
+  let left = r.left;
+  if (left + w > window.innerWidth) left = window.innerWidth - w;
+  if (left < 0) left = 0;
+  box.style.left = left + "px";
+  box.style.top = top + "px";
 }
+
+let tipAnchor = null;
 
 function showTip(title, rows, anchor) {
   const tip = el("tooltip");
   tip.replaceChildren(make("h3", "", title), pairs(rows));
   tip.hidden = false;
+  tipAnchor = anchor;
   place(tip, anchor);
 }
 
 function hideTip() {
+  tipAnchor = null;
   el("tooltip").hidden = true;
 }
 
@@ -309,9 +404,16 @@ function bindInput() {
     });
   });
   const map = el("map");
-  ["mousedown", "mouseup", "mousemove"].forEach((type) => {
-    map.addEventListener(type, (e) => {
-      game.mouse(type, e.button, e.offsetX, e.offsetY, e.shiftKey);
+  map.addEventListener("mousedown", (e) => {
+    game.mouse("mousedown", e.button, e.offsetX, e.offsetY, e.shiftKey);
+  });
+  // Moves and releases are read over the whole window, in map pixels, so
+  // Edge Pan works where the top bar, grid or minimap cover the map's edge.
+  ["mouseup", "mousemove"].forEach((type) => {
+    window.addEventListener(type, (e) => {
+      if (!ui || ui.screen !== "match") return;
+      const r = map.getBoundingClientRect();
+      game.mouse(type, e.button, e.clientX - r.left, e.clientY - r.top, e.shiftKey);
     });
   });
   map.addEventListener("contextmenu", (e) => e.preventDefault());
@@ -440,8 +542,14 @@ function refresh() {
   if (ui.navigate) window.location.href = ui.navigate;
   if (ui.net_requests) ui.net_requests.forEach(netRequest);
   const inMatch = ui.screen === "match";
+  const starting = inMatch && el("match").hidden;
   el("menus").hidden = inMatch;
   el("match").hidden = !inMatch;
+  // Every new match gets a view the size of the window.
+  if (starting) {
+    overlayText = "";
+    resize();
+  }
   if (inMatch) {
     drawBar(ui.match);
     drawGrid(ui.match);
@@ -471,6 +579,9 @@ async function start() {
   crypto.getRandomValues(entropy);
   game = new Game(strings, glossary, readStore("defaults"), readStore("player"), crypto.randomUUID(), entropy[0]);
   hints = JSON.parse(game.hints());
+  // `?codes`: the pasted-code path (Invite Code, Reply Code), for the
+  // automated online check only.
+  if (new URLSearchParams(location.search).has("codes")) game.act("flag.codes", "on", false, false);
   assets = JSON.parse(render_assets());
   bindInput();
   refresh();

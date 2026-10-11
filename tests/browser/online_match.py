@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Online match check (PLAN decision 18): two tabs play a short match through
-the game's own menus, connected by pasted codes with `?ice=none`, so no relay
+the game's own menus, connected by pasted codes (`?codes` shows them) with `?ice=none`, so no relay
 or STUN server is contacted, and any off-origin request fails the check.
 
 For each engine:
@@ -31,7 +31,7 @@ def open_tab(browser, origin, name, seen):
     page.on("console", lambda m: seen["console"].append(tag + m.text) if m.type == "error" else None)
     page.on("pageerror", lambda e: seen["errors"].append(tag + str(e)))
     page.on("websocket", lambda ws: seen["sockets"].append(ws.url))
-    page.goto(origin + "/index.html?ice=none")
+    page.goto(origin + "/index.html?ice=none&codes")
     page.wait_for_selector("body[data-ready='true']", timeout=T.WAIT_MS)
     page.click("#go\\.online")
     page.wait_for_selector("#online\\.host_code", timeout=T.WAIT_MS)
@@ -51,7 +51,7 @@ def clock_seconds(page):
 
 
 def run_engine(p, engine, origin):
-    print(f"\n[{engine}] {origin}/index.html?ice=none")
+    print(f"\n[{engine}] {origin}/index.html?ice=none&codes")
     seen = {"foreign": [], "console": [], "errors": [], "sockets": []}
     browser = getattr(p, engine).launch()
     fix = T.loopback if engine in T.LOOPBACK_ONLY else (lambda c: c)

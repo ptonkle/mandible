@@ -76,6 +76,9 @@ fn on_screen_names_are_glossary_terms() {
         "biome.",
         "color.",
         "end.",
+        "time.",
+        "short.",
+        "event.",
     ];
     let mut bad = Vec::new();
     for (k, v) in strings() {

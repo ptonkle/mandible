@@ -16,6 +16,9 @@ Every game word is defined in [`GLOSSARY.md`](GLOSSARY.md). The design is in [`B
 | Train | From anywhere, with no selection: Tier 1 species from queens, the rest from their **hatchery**. |
 | Fight | Set **waypoints** per species (Waypoints tab). Ants walk there and fight whatever they meet on the way. **All Ants** sets one waypoint for every combat species. |
 | Tech | **Evolve** to Tier 2 and Tier 3 (Colony tab) to unlock species and upgrade ranks. |
+| Sandbox | **Sandbox** (Match Settings): unlimited resources and Tier 3 for human colonies, plus Pause and Time Scale. |
+| Scout | **Auto-Scout** (Colony tab): one combat ant explores by itself. **Map Revealed** (Match Settings) starts every colony with the map Explored. |
+| Online | **Host** with the Room Code empty fills in a random code (6 characters, no 1, 0, I or O) to share; **Join** with the code. Codes are not case-sensitive. |
 | Events | A **Windfall** (a cache of resources) or a **Hill** (hold it longest to win a bundle) appears every 60–90 s from 1:30. |
 
 ### Controls
@@ -25,14 +28,18 @@ Every game word is defined in [`GLOSSARY.md`](GLOSSARY.md). The design is in [`B
 | Grid tabs: Ants, Build, Waypoints, Upgrades, Colony | `1` `2` `3` `4` `5` |
 | Grid buttons, laid out like the keyboard | `Q W E R` / `A S D F` / `Z X C V` |
 | Train 10 / Train Max | Ctrl or Alt + button / Shift + button |
-| Place a blueprint; set a waypoint | Button, then left-click the map. Shift keeps placing. |
+| Place a blueprint | Button, then left-click the map. Shift + click keeps placing. |
+| Set a waypoint (replaces that species' waypoints) | Button, then left-click the map |
+| Add a waypoint (up to 4 per species) | Button, then Shift + click; stays in waypoint mode |
 | Wall | Button, then press, drag and release |
 | Clear a waypoint; cancel a blueprint | Right-click it |
-| Cancel a queued item | Click it in the queue bar (refunded) |
-| Pan the view | Drag, arrow keys, screen edges, or the minimap |
+| Cancel a queued item | Click it in the queue bar: one at a time, refunded. Ants of one species show once per queen or hatchery, with a ×N count |
+| Pan the view | Drag, arrow keys, screen edges (all four, even under the top bar), or the minimap |
 | Zoom | Mouse wheel |
 | Home Nest | `Space` |
 | Menu (Resume, Concede); cancel placement | `Esc` |
+| Pause, Time Scale (×½ to ×4) | Top-bar buttons, in a Sandbox match or while spectating; never online |
+| Spectate an all-AI match | Play vs AI: set Red to an AI. The Fog of War button picks whose view to show (Off: the whole map) |
 
 Every hotkey can be remapped in **Player Settings → Keybinds**. Ctrl+W cannot be caught by a web page, so Alt also gives Train 10.
 

@@ -11,6 +11,7 @@ use std::collections::BTreeMap;
 
 use serde_json::{json, Value};
 
+use crate::dice::Rng;
 use crate::fixed::{Pos, CELL};
 use crate::keys::{key_label, PlayerSettings};
 use crate::lockstep::{
@@ -25,7 +26,7 @@ use crate::settings::{
     can_disable, Biome, Difficulty, Format, GameSpeed, Level, MatchSettings, SeatKind, TUNNEL_MAX,
     TUNNEL_MIN,
 };
-use crate::world::{Amount, Command, Controller, Focus, Refusal, Work, World};
+use crate::world::{Amount, Command, Controller, Focus, Refusal, Work, World, HILL_REWARD};
 
 /// Peers with different builds refuse each other; raise on every release
 /// that changes the simulation or the wire.
@@ -51,8 +52,18 @@ pub enum Button {
     Research(Upgrade),
     Evolve,
     Retreat,
+    AutoScout,
     Focus(Focus),
 }
+
+/// Time Scale steps for a Sandbox match or a spectated one, as
+/// (numerator, denominator) of real time. Never online: lockstep peers
+/// must all run at the agreed Game Speed.
+pub const TIME_SCALES: [(i64, i64); 4] = [(1, 2), (1, 1), (2, 1), (4, 1)];
+
+/// Room Code symbols: capital letters and digits without 1, 0, I and O.
+pub const ROOM_CODE_SYMBOLS: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+pub const ROOM_CODE_LEN: usize = 6;
 
 pub const TABS: [&str; 5] = ["ants", "build", "waypoints", "upgrades", "colony"];
 
@@ -116,6 +127,7 @@ pub fn grid(tab: usize) -> [Option<Button>; 12] {
             g[6] = Some(Button::Focus(Focus::Nectar));
             g[7] = Some(Button::Focus(Focus::Leaves));
             g[8] = Some(Button::Research(Upgrade::BuildRate));
+            g[9] = Some(Button::AutoScout);
         }
     }
     g
@@ -156,6 +168,13 @@ pub struct Game {
     pub pending: Vec<Command>,
     pub lockstep: Option<Match>,
     pub ended_at: Option<i32>,
+    /// No seat is You: the match is watched (Spectate), never played.
+    pub spectate: bool,
+    /// While spectating, whose Fog of War is drawn; `None` shows the whole map.
+    pub vision: Option<u8>,
+    /// Pause and Time Scale: local matches only (Sandbox or Spectate).
+    pub paused: bool,
+    pub time_scale: usize,
 }
 
 impl Game {
@@ -182,12 +201,42 @@ impl Game {
             pending: Vec::new(),
             lockstep,
             ended_at: None,
+            spectate: false,
+            vision: None,
+            paused: false,
+            time_scale: 1,
         }
+    }
+
+    /// A watched match: no seat is You, and the whole map is visible.
+    pub fn spectating(world: World) -> Game {
+        let mut g = Game::new(world, 0, None);
+        g.spectate = true;
+        g
+    }
+
+    /// The colony the top bar, the queue bar and the drawing follow:
+    /// yours, or while spectating the one whose Fog of War is shown.
+    pub fn follow(&self) -> Option<u8> {
+        if self.spectate {
+            self.vision
+        } else {
+            Some(self.me)
+        }
+    }
+
+    /// Pause and Time Scale are offered: a local Sandbox or spectated match.
+    pub fn time_controls(&self) -> bool {
+        self.lockstep.is_none() && (self.spectate || self.world.settings.sandbox)
     }
 
     /// Issues a command for the local colony: into the next tick when
     /// local, into the next turn when online.
     pub fn issue(&mut self, cmd: Command) {
+        // A spectator owns no colony, so it never issues a command.
+        if self.spectate {
+            return;
+        }
         match &mut self.lockstep {
             Some(m) => m.queue_command(serde_json::to_string(&cmd).expect("serialises")),
             None => self.pending.push(cmd),
@@ -218,6 +267,9 @@ pub struct Online {
     pub invite: String,
     pub reply: String,
     pub status: String,
+    /// The pasted-code path (Invite Code, Reply Code) is shown: only with
+    /// the page's `?codes` flag, for the automated online check.
+    pub codes: bool,
     /// Peers met before the host: told to the lobby once it exists.
     pub early_peers: Vec<PeerId>,
 }
@@ -232,6 +284,8 @@ pub struct App {
     pub setup: MatchSettings,
     pub ai_seats: Vec<Difficulty>,
     pub seed_text: String,
+    /// Seat 1 in Play vs AI: You (`None`) or an AI of this difficulty.
+    pub first_seat: Option<Difficulty>,
     pub rebinding: Option<String>,
     pub game: Option<Game>,
     pub online: Online,
@@ -283,6 +337,7 @@ impl App {
             player,
             ai_seats: vec![Difficulty::Pupa; 3],
             seed_text: String::new(),
+            first_seat: None,
             rebinding: None,
             game: None,
             online: Online {
@@ -293,6 +348,7 @@ impl App {
                 invite: String::new(),
                 reply: String::new(),
                 status: String::new(),
+                codes: false,
                 early_peers: Vec::new(),
             },
             client_id: client_id.to_string(),
@@ -399,6 +455,17 @@ impl App {
         })
     }
 
+    fn on_off(&self, id: &str, label_key: &str, on: bool) -> Value {
+        let mut f = self.select(
+            id,
+            label_key,
+            vec![("on".into(), self.t("on")), ("off".into(), self.t("off"))],
+            if on { "on" } else { "off" },
+        );
+        f["term"] = json!(self.t(label_key));
+        f
+    }
+
     fn settings_fields(&self, m: &MatchSettings, prefix: &str, editable: bool) -> Vec<Value> {
         let lvl = |k: &str| -> Vec<(String, String)> {
             ["low", "normal", "high"]
@@ -445,6 +512,14 @@ impl App {
                 (
                     self.t("setting.events"),
                     self.t(if m.events { "on" } else { "off" }),
+                ),
+                (
+                    self.t("setting.map_revealed"),
+                    self.t(if m.map_revealed { "on" } else { "off" }),
+                ),
+                (
+                    self.t("setting.sandbox"),
+                    self.t(if m.sandbox { "on" } else { "off" }),
                 ),
             ];
             return vec![json!({"type": "list", "rows": rows})];
@@ -515,6 +590,12 @@ impl App {
                 vec![("on".into(), self.t("on")), ("off".into(), self.t("off"))],
                 if m.events { "on" } else { "off" },
             ),
+            self.on_off(
+                &format!("{prefix}.map_revealed"),
+                "setting.map_revealed",
+                m.map_revealed,
+            ),
+            self.on_off(&format!("{prefix}.sandbox"), "setting.sandbox", m.sandbox),
         ];
         let mut toggles = Vec::new();
         for s in Species::ALL {
@@ -554,33 +635,41 @@ impl App {
                         self.t("seat.team"),
                         self.setup.format.team_of(i) + 1
                     );
-                    let color = self.t(&format!("color.{i}"));
-                    if i == 0 {
-                        seats.push(json!({"type": "list", "rows": [[color, format!("{} · {}", self.t("seat.you"), team)]]}));
+                    let d = if i == 0 {
+                        self.first_seat
                     } else {
-                        let d = self.ai_seats[i - 1];
-                        let mut sel = self.select(
-                            &format!("ai.{i}"),
-                            &format!("color.{i}"),
-                            ["larva", "pupa", "imago"]
-                                .iter()
-                                .map(|v| {
-                                    (
-                                        v.to_string(),
-                                        format!(
-                                            "{} {} · {}",
-                                            self.t("seat.ai"),
-                                            self.t(&format!("difficulty.{v}")),
-                                            team
-                                        ),
-                                    )
-                                })
-                                .collect(),
-                            difficulty_key(d),
-                        );
-                        sel["term"] = json!(self.t(&format!("difficulty.{}", difficulty_key(d))));
-                        seats.push(sel);
+                        Some(self.ai_seats[i - 1])
+                    };
+                    let mut options = Vec::new();
+                    if i == 0 {
+                        // Seat 1 may be You or an AI; with no You, the match
+                        // is spectated.
+                        options.push((
+                            "you".to_string(),
+                            format!("{} · {}", self.t("seat.you"), team),
+                        ));
                     }
+                    for v in ["larva", "pupa", "imago"] {
+                        options.push((
+                            v.to_string(),
+                            format!(
+                                "{} {} · {}",
+                                self.t("seat.ai"),
+                                self.t(&format!("difficulty.{v}")),
+                                team
+                            ),
+                        ));
+                    }
+                    let value = d.map(difficulty_key).unwrap_or("you");
+                    let mut sel =
+                        self.select(&format!("ai.{i}"), &format!("color.{i}"), options, value);
+                    if let Some(d) = d {
+                        sel["term"] = json!(self.t(&format!("difficulty.{}", difficulty_key(d))));
+                    }
+                    seats.push(sel);
+                }
+                if self.first_seat.is_some() {
+                    seats.push(json!({"type": "list", "rows": [[self.t("stat.status"), self.t("hud.spectate")]]}));
                 }
                 seats.push(json!({"type": "input", "id": "pva.seed", "label": self.t("setting.seed"), "value": self.seed_text, "placeholder": self.t("random")}));
                 vec![
@@ -629,26 +718,32 @@ impl App {
                     ]}),
                 ]
             }
-            Screen::Online => vec![
-                json!({"kind": "form", "heading": self.t("menu.online"), "items": [
-                    {"type": "input", "id": "online.room", "label": self.t("online.room_code"), "value": self.online.room},
-                    {"type": "list", "rows": [[self.t("online.status"), self.online.status]]},
-                ]}),
-                json!({"kind": "row", "items": [
-                    self.button("online.host", "online.host"),
-                    self.button("online.join", "online.join"),
-                ]}),
-                json!({"kind": "form", "items": [
-                    {"type": "code", "id": "online.invite", "label": self.t("online.invite_code"), "value": self.online.invite},
-                    {"type": "code", "id": "online.reply", "label": self.t("online.reply_code"), "value": self.online.reply},
-                ]}),
-                json!({"kind": "row", "items": [
-                    self.button("online.host_code", "online.host_by_code"),
-                    self.button("online.join_code", "online.join_by_code"),
-                    self.button("online.connect", "online.connect"),
-                    self.button("go.main_menu", "menu.back"),
-                ]}),
-            ],
+            Screen::Online => {
+                let mut panels = vec![
+                    json!({"kind": "form", "heading": self.t("menu.online"), "items": [
+                        {"type": "input", "id": "online.room", "label": self.t("online.room_code"), "value": self.online.room},
+                        {"type": "list", "rows": [[self.t("online.status"), self.online.status]]},
+                    ]}),
+                    json!({"kind": "row", "items": [
+                        self.button("online.host", "online.host"),
+                        self.button("online.join", "online.join"),
+                        self.button("go.main_menu", "menu.back"),
+                    ]}),
+                ];
+                if self.online.codes {
+                    // The pasted-code path, behind the page's `?codes` flag.
+                    panels.push(json!({"kind": "form", "items": [
+                        {"type": "code", "id": "online.invite", "label": self.t("online.invite_code"), "value": self.online.invite},
+                        {"type": "code", "id": "online.reply", "label": self.t("online.reply_code"), "value": self.online.reply},
+                    ]}));
+                    panels.push(json!({"kind": "row", "items": [
+                        self.button("online.host_code", "online.host_by_code"),
+                        self.button("online.join_code", "online.join_by_code"),
+                        self.button("online.connect", "online.connect"),
+                    ]}));
+                }
+                panels
+            }
             Screen::Lobby => self.lobby_panels(),
             Screen::Match => Vec::new(),
         }
@@ -716,8 +811,9 @@ impl App {
         }
         let mut panels =
             vec![json!({"kind": "form", "heading": self.t("online.lobby"), "items": seats})];
-        if host {
-            // Pasted codes: one Invite Code per joiner, answered by a Reply Code.
+        if host && self.online.codes {
+            // Pasted codes (`?codes` only): one Invite Code per joiner,
+            // answered by a Reply Code.
             panels.push(json!({"kind": "form", "items": [
                 {"type": "code", "id": "online.invite", "label": self.t("online.invite_code"), "value": self.online.invite},
                 {"type": "code", "id": "online.reply", "label": self.t("online.reply_code"), "value": self.online.reply},
@@ -739,7 +835,198 @@ impl App {
             return Value::Null;
         };
         let w = &g.world;
-        let me = g.me;
+        let follow = g.follow();
+        let mut hud = match follow {
+            Some(me) => self.colony_bar(w, me),
+            None => self.summary_bar(w),
+        };
+        let mut flags = Vec::new();
+        if let Some(me) = follow {
+            let c = &w.colonies[me as usize];
+            let pop = w.population(me);
+            let housing = w.housing(me);
+            let queued_train = w
+                .structures
+                .iter()
+                .filter(|s| s.colony == me && s.complete)
+                .any(|s| {
+                    s.lane.first().is_some_and(
+                        |q| matches!(q.work, Work::Train(sp) if pop + sp.stats().pop > housing),
+                    )
+                });
+            if queued_train {
+                flags.push(
+                    json!({"text": self.t("hud.housing_full"), "term": self.t("hud.housing_full")}),
+                );
+            }
+            if c.retreat {
+                flags.push(
+                    json!({"text": self.t("hud.retreat_on"), "term": self.t("action.retreat")}),
+                );
+            }
+        }
+        if g.spectate {
+            flags.push(json!({"text": self.t("hud.spectate"), "term": self.t("hud.spectate")}));
+        }
+        if g.paused {
+            flags.push(json!({"text": self.t("hud.paused"), "term": self.t("time.pause")}));
+        }
+        if let Some(m) = &g.lockstep {
+            match m.status() {
+                MatchStatus::WaitingOn(seats) => {
+                    let who: Vec<String> = seats
+                        .iter()
+                        .map(|s| self.t(&format!("color.{s}")))
+                        .collect();
+                    flags.push(json!({"text": format!("{}: {}", self.t("hud.waiting_on"), who.join(", "))}));
+                }
+                MatchStatus::Resyncing => flags.push(json!({"text": self.t("hud.resyncing")})),
+                _ => {}
+            }
+        }
+        hud["flags"] = Value::Array(flags);
+        hud["clock"] = json!(clock(w.tick));
+        // While a Hill is open: its time left and the team leading it.
+        if let Some(h) = &w.events.hill {
+            let best = h.hold.iter().copied().max().unwrap_or(0);
+            let leaders: Vec<usize> = (0..h.hold.len()).filter(|t| h.hold[*t] == best).collect();
+            let leader = if best > 0 && leaders.len() == 1 {
+                self.team_name(w, leaders[0] as u8)
+            } else {
+                self.t("stat.none")
+            };
+            let left = clock((h.ends - w.tick).max(0));
+            if let Some(stats) = hud["stats"].as_array_mut() {
+                stats.push(json!({"key": "hill", "label": self.t("event.hill"), "value": format!("{left} · {leader}"), "term": self.t("event.hill")}));
+            }
+        }
+
+        let queue = match follow {
+            Some(me) => self.queue_bar(w, me),
+            None => Vec::new(),
+        };
+
+        // Action grid: none while spectating.
+        let (tabs, buttons): (Vec<Value>, Vec<Value>) = if g.spectate {
+            (Vec::new(), Vec::new())
+        } else {
+            let tabs = TABS
+                .iter()
+                .enumerate()
+                .map(|(i, t)| {
+                    json!({
+                        "id": format!("tab.{i}"),
+                        "label": self.t(&format!("tab.{t}")),
+                        "key": key_label(&self.player.key_of(&format!("tab.{i}"))),
+                        "active": i == g.tab,
+                    })
+                })
+                .collect();
+            let buttons = grid(g.tab)
+                .iter()
+                .enumerate()
+                .map(|(i, b)| {
+                    let key = key_label(&self.player.key_of(&format!("grid.{i}")));
+                    match b {
+                        Some(b) => self.grid_button(g, *b, i, &key),
+                        None => json!({"id": format!("grid.{i}"), "empty": true, "key": key}),
+                    }
+                })
+                .collect();
+            (tabs, buttons)
+        };
+
+        // Pause, Time Scale and (spectating) whose Fog of War is shown.
+        let mut controls = Vec::new();
+        if g.spectate {
+            let whose = match g.vision {
+                Some(c) => self.t(&format!("color.{c}")),
+                None => self.t("off"),
+            };
+            controls.push(json!({"id": "spectate.vision", "text": format!("{}: {whose}", self.t("hud.fog_of_war")), "term": self.t("hud.fog_of_war"), "active": false}));
+        }
+        if g.time_controls() {
+            controls.push(json!({"id": "time.pause", "text": self.t("time.pause"), "term": self.t("time.pause"), "active": g.paused}));
+            controls.push(json!({"id": "time.scale", "text": format!("{}: {}", self.t("time.scale"), self.t(&format!("time.scale.{}", g.time_scale))), "term": self.t("time.scale"), "active": false}));
+        }
+
+        let notices: Vec<Value> = w
+            .announcements
+            .iter()
+            .rev()
+            .filter(|a| a.colony.is_none() || a.colony == follow)
+            .filter(|a| w.tick - a.tick < 6 * TICKS_PER_SECOND)
+            .take(4)
+            .map(|a| json!({"text": self.announcement_text(w, &a.key)}))
+            .collect();
+
+        let mut v = json!({
+            "hud": hud,
+            "queue": queue,
+            "tabs": tabs,
+            "grid": buttons,
+            "spectate": g.spectate,
+            "controls": controls,
+            "notices": notices,
+            "mode": match g.mode {
+                Mode::Idle => "idle",
+                Mode::Place(_) | Mode::Wall(_) => "place",
+                Mode::Waypoint(_) => "waypoint",
+            },
+        });
+        if let Some(team) = w.winner {
+            let length = clock(g.ended_at.unwrap_or(w.tick));
+            v["end"] = if g.spectate {
+                let mut rows = vec![json!([self.t("stat.match_length"), length])];
+                for (i, c) in w.colonies.iter().enumerate() {
+                    rows.push(json!([
+                        self.t(&format!("color.{i}")),
+                        format!(
+                            "{} {} · {} {} · {} {}",
+                            self.t("stat.trained"),
+                            c.tally.trained,
+                            self.t("stat.killed"),
+                            c.tally.killed,
+                            self.t("stat.lost"),
+                            c.tally.lost
+                        )
+                    ]));
+                }
+                json!({
+                    "title": format!("{}: {}", self.t("end.victory"), self.team_name(w, team)),
+                    "rows": rows,
+                    "button": self.button("end.main_menu", "menu.main_menu"),
+                })
+            } else {
+                let c = &w.colonies[g.me as usize];
+                let t = &c.tally;
+                json!({
+                    "title": self.t(if team == c.team { "end.victory" } else { "end.defeat" }),
+                    "rows": [
+                        [self.t("stat.match_length"), length],
+                        [self.t("stat.trained"), t.trained.to_string()],
+                        [self.t("stat.killed"), t.killed.to_string()],
+                        [self.t("stat.lost"), t.lost.to_string()],
+                        [self.t("stat.gathered"), self.cost_text(&t.gathered)],
+                    ],
+                    "button": self.button("end.main_menu", "menu.main_menu"),
+                })
+            };
+        } else if g.menu_open {
+            v["menu"] = if g.confirm_concede {
+                json!({"heading": self.t("menu.concede_confirm"), "items": [self.button("menu.concede_yes", "menu.concede"), self.button("menu.resume", "menu.resume")]})
+            } else if g.spectate {
+                // A spectator has nothing to concede: Resume or leave.
+                json!({"items": [self.button("menu.resume", "menu.resume"), self.button("end.main_menu", "menu.main_menu")]})
+            } else {
+                json!({"items": [self.button("menu.resume", "menu.resume"), self.button("menu.concede", "menu.concede")]})
+            };
+        }
+        v
+    }
+
+    /// The top bar for one colony: resources with Income, Population, Tier.
+    fn colony_bar(&self, w: &World, me: u8) -> Value {
         let c = &w.colonies[me as usize];
         let income = w.income_tenths(me);
         let resources: Vec<Value> = Resource::ALL
@@ -756,53 +1043,78 @@ impl App {
             .collect();
         let pop = w.population(me);
         let housing = w.housing(me);
-        let queued_train = w
-            .structures
-            .iter()
-            .filter(|s| s.colony == me && s.complete)
-            .any(|s| {
-                s.lane
-                    .first()
-                    .map(|q| matches!(q.work, Work::Train(sp) if pop + sp.stats().pop > housing))
-                    .unwrap_or(false)
-            });
-        let mut hud = json!({
+        json!({
             "resources": resources,
-            "population": {"label": self.t("stat.population"), "value": format!("{pop} / {housing}"), "term": self.t("stat.population")},
-            "tier": {"label": self.t("stat.tier"), "value": c.tier.to_string(), "term": self.t("stat.tier")},
-            "clock": format!("{}:{:02}", w.tick / TICKS_PER_SECOND / 60, w.tick / TICKS_PER_SECOND % 60),
+            "stats": [
+                {"key": "population", "label": self.t("stat.population"), "value": format!("{pop} / {housing}"), "term": self.t("stat.population")},
+                {"key": "tier", "label": self.t("stat.tier"), "value": c.tier.to_string(), "term": self.t("stat.tier")},
+            ],
             "colour": self.t(&format!("color.{me}")),
-        });
-        let mut flags = Vec::new();
-        if queued_train {
-            flags.push(
-                json!({"text": self.t("hud.housing_full"), "term": self.t("hud.housing_full")}),
-            );
-        }
-        if c.retreat {
-            flags.push(json!({"text": self.t("hud.retreat_on"), "term": self.t("action.retreat")}));
-        }
-        if let Some(m) = &g.lockstep {
-            match m.status() {
-                MatchStatus::WaitingOn(seats) => {
-                    let who: Vec<String> = seats
-                        .iter()
-                        .map(|s| self.t(&format!("color.{s}")))
-                        .collect();
-                    flags.push(json!({"text": format!("{}: {}", self.t("hud.waiting_on"), who.join(", "))}));
-                }
-                MatchStatus::Resyncing => flags.push(json!({"text": self.t("hud.resyncing")})),
-                _ => {}
-            }
-        }
-        hud["flags"] = Value::Array(flags);
+        })
+    }
 
-        // Queue bar: every training and research item, front first.
+    /// The top bar while spectating the whole map: every colony's
+    /// Population and Tier.
+    fn summary_bar(&self, w: &World) -> Value {
+        let stats: Vec<Value> = w
+            .colonies
+            .iter()
+            .enumerate()
+            .map(|(i, c)| {
+                let value = if c.defeated {
+                    self.t("announce.defeated")
+                } else {
+                    format!(
+                        "{} {} / {} · {} {}",
+                        self.t("stat.population"),
+                        w.population(i as u8),
+                        w.housing(i as u8),
+                        self.t("stat.tier"),
+                        c.tier
+                    )
+                };
+                json!({"key": format!("colony.{i}"), "label": self.t(&format!("color.{i}")), "value": value, "term": ""})
+            })
+            .collect();
+        json!({"resources": [], "stats": stats, "colour": ""})
+    }
+
+    /// The name of a team: its player color when it is one colony (1v1,
+    /// Free-for-all), else "Team 2".
+    fn team_name(&self, w: &World, team: u8) -> String {
+        let members: Vec<usize> = (0..w.colonies.len())
+            .filter(|i| w.colonies[*i].team == team)
+            .collect();
+        if members.len() == 1 {
+            self.t(&format!("color.{}", members[0]))
+        } else {
+            format!("{} {}", self.t("seat.team"), team as i32 + 1)
+        }
+    }
+
+    /// Queue bar: for each queen or hatchery, one item per species in
+    /// training (with its count) and one per upgrade or evolution, front
+    /// first. A click cancels one: the last of its kind, so the front
+    /// keeps its progress.
+    fn queue_bar(&self, w: &World, me: u8) -> Vec<Value> {
         let mut queue = Vec::new();
         for s in w.structures.iter().filter(|s| s.colony == me) {
-            let all = s.lane.iter().chain(s.research.iter());
-            for (slot, q) in all.enumerate() {
-                let (label, icon) = match q.work {
+            let items: Vec<&crate::world::QueueItem> =
+                s.lane.iter().chain(s.research.iter()).collect();
+            let mut groups: Vec<(String, Vec<usize>)> = Vec::new();
+            for (slot, q) in items.iter().enumerate() {
+                let key = match q.work {
+                    Work::Train(sp) => format!("species.{}", sp.key()),
+                    _ => format!("slot.{slot}"),
+                };
+                match groups.iter_mut().find(|(k, _)| *k == key) {
+                    Some((_, slots)) => slots.push(slot),
+                    None => groups.push((key, vec![slot])),
+                }
+            }
+            for (key, slots) in groups {
+                let front = items[slots[0]];
+                let (label, icon) = match front.work {
                     Work::Train(sp) => (self.species_name(sp), format!("species.{}", sp.key())),
                     Work::Research(u, r) => (
                         format!("{} {}", self.upgrade_name(u), roman(r)),
@@ -813,89 +1125,50 @@ impl App {
                         "action.evolve".into(),
                     ),
                 };
-                let pct = q.progress * 100 / q.total.max(1);
+                let n = slots.len();
+                let count = if n > 1 {
+                    format!("×{n}")
+                } else {
+                    String::new()
+                };
+                let title = if n > 1 {
+                    format!("{label} {count}")
+                } else {
+                    label
+                };
+                let left: i32 = slots
+                    .iter()
+                    .map(|i| items[*i].total - items[*i].progress)
+                    .sum();
+                let pct = front.progress * 100 / front.total.max(1);
+                let last = slots[n - 1];
                 queue.push(json!({
-                    "id": format!("cancel.{}.{}", s.id, slot),
-                    "label": label,
+                    "key": format!("{}.{key}", s.id),
+                    "id": format!("cancel.{}.{last}", s.id),
+                    "label": title,
                     "icon": icon,
+                    "count": count,
                     "progress": format!("{pct}%"),
-                    "rows": [[self.t("stat.duration"), self.seconds(q.total - q.progress)], [self.t("stat.cost"), self.cost_text(&q.cost)]],
+                    "rows": [
+                        [self.t("stat.duration"), self.seconds(left)],
+                        [self.t("stat.cost"), self.cost_text(&front.cost)],
+                        [self.t("stat.hotkey"), format!("{}: {}", self.t("hud.click"), self.t("action.cancel"))],
+                    ],
                 }));
             }
         }
-
-        // Action grid.
-        let tabs: Vec<Value> = TABS
-            .iter()
-            .enumerate()
-            .map(|(i, t)| {
-                json!({
-                    "id": format!("tab.{i}"),
-                    "label": self.t(&format!("tab.{t}")),
-                    "key": key_label(&self.player.key_of(&format!("tab.{i}"))),
-                    "active": i == g.tab,
-                })
-            })
-            .collect();
-        let buttons: Vec<Value> = grid(g.tab)
-            .iter()
-            .enumerate()
-            .map(|(i, b)| {
-                let key = key_label(&self.player.key_of(&format!("grid.{i}")));
-                match b {
-                    Some(b) => self.grid_button(g, *b, i, &key),
-                    None => json!({"id": format!("grid.{i}"), "empty": true, "key": key}),
-                }
-            })
-            .collect();
-
-        let notices: Vec<Value> = w
-            .announcements
-            .iter()
-            .rev()
-            .filter(|a| a.colony.is_none() || a.colony == Some(me))
-            .filter(|a| w.tick - a.tick < 6 * TICKS_PER_SECOND)
-            .take(4)
-            .map(|a| json!({"text": self.announcement_text(&a.key)}))
-            .collect();
-
-        let mut v = json!({
-            "hud": hud,
-            "queue": queue,
-            "tabs": tabs,
-            "grid": buttons,
-            "notices": notices,
-            "mode": match g.mode {
-                Mode::Idle => "idle",
-                Mode::Place(_) | Mode::Wall(_) => "place",
-                Mode::Waypoint(_) => "waypoint",
-            },
-        });
-        if let Some(team) = w.winner {
-            let mine = w.colonies[me as usize].team;
-            let t = &c.tally;
-            v["end"] = json!({
-                "title": self.t(if team == mine { "end.victory" } else { "end.defeat" }),
-                "rows": [
-                    [self.t("stat.match_length"), format!("{}:{:02}", g.ended_at.unwrap_or(w.tick) / TICKS_PER_SECOND / 60, g.ended_at.unwrap_or(w.tick) / TICKS_PER_SECOND % 60)],
-                    [self.t("stat.trained"), t.trained.to_string()],
-                    [self.t("stat.killed"), t.killed.to_string()],
-                    [self.t("stat.lost"), t.lost.to_string()],
-                    [self.t("stat.gathered"), self.cost_text(&t.gathered)],
-                ],
-                "button": self.button("end.main_menu", "menu.main_menu"),
-            });
-        } else if g.menu_open {
-            v["menu"] = if g.confirm_concede {
-                json!({"heading": self.t("menu.concede_confirm"), "items": [self.button("menu.concede_yes", "menu.concede"), self.button("menu.resume", "menu.resume")]})
-            } else {
-                json!({"items": [self.button("menu.resume", "menu.resume"), self.button("menu.concede", "menu.concede")]})
-            };
-        }
-        v
+        queue
     }
 
-    fn announcement_text(&self, key: &str) -> String {
+    fn announcement_text(&self, w: &World, key: &str) -> String {
+        if key == "announce.hill" {
+            return format!(
+                "{} · {}: {}",
+                self.t("announce.hill"),
+                self.t("stat.reward"),
+                self.cost_text(&HILL_REWARD)
+            );
+        }
         if let Some(r) = key.strip_prefix("notice.needs_hatchery.") {
             let name = Species::from_key(r)
                 .map(|s| self.structure_name(StructureKind::Hatchery(s)))
@@ -916,11 +1189,22 @@ impl App {
             );
         }
         if let Some(t) = key.strip_prefix("announce.hill_won.") {
+            let gains: Vec<String> = Resource::ALL
+                .iter()
+                .filter(|r| HILL_REWARD[r.index()] > 0)
+                .map(|r| {
+                    format!(
+                        "+{} {}",
+                        HILL_REWARD[r.index()],
+                        self.t(&format!("resource.{}", r.key()))
+                    )
+                })
+                .collect();
             return format!(
-                "{}: {} {}",
+                "{}: {} · {}",
                 self.t("announce.hill_won"),
-                self.t("seat.team"),
-                t.parse::<i32>().unwrap_or(0) + 1
+                self.team_name(w, t.parse::<u8>().unwrap_or(0)),
+                gains.join(" · ")
             );
         }
         if let Some(c) = key.strip_prefix("announce.defeated.") {
@@ -940,9 +1224,12 @@ impl App {
         let c = &w.colonies[me as usize];
         let mut rows: Vec<Value> = Vec::new();
         let row = |l: &str, v: String| json!([self.t(l), v]);
+        // The tier badge: the tier a button needs (Ants, Build, Upgrades).
+        let mut tier: Option<u8> = None;
         let (label, icon, state, active) = match b {
             Button::Train(s) => {
                 let st = c.ranks.apply(s);
+                tier = Some(st.tier);
                 rows.push(row("stat.role", self.t(&format!("role.{}", st.role.key()))));
                 rows.push(row("stat.tier", st.tier.to_string()));
                 rows.push(row("stat.cost", self.cost_text(&st.cost)));
@@ -1019,17 +1306,41 @@ impl App {
             }
             Button::Place(k) => {
                 let st = k.stats();
+                tier = Some(st.tier);
                 rows.push(row("stat.cost", self.cost_text(&st.cost)));
                 rows.push(row("stat.health", st.health.to_string()));
                 if st.housing > 0 {
                     rows.push(row("stat.housing", st.housing.to_string()));
                 }
                 rows.push(row("stat.tier", st.tier.to_string()));
-                if let StructureKind::Hatchery(s) = k {
-                    rows.push(row(
+                match k {
+                    StructureKind::Hatchery(s) => rows.push(row(
                         "stat.effect",
                         format!("{} {}", self.t("action.train"), self.species_name(s)),
-                    ));
+                    )),
+                    StructureKind::Queen => {
+                        let names: Vec<String> = Species::ALL
+                            .iter()
+                            .filter(|s| s.from_queen())
+                            .map(|s| self.species_name(*s))
+                            .collect();
+                        rows.push(row(
+                            "stat.effect",
+                            format!(
+                                "{} {} · {} · {} +{}",
+                                self.t("action.train"),
+                                names.join(", "),
+                                self.t("stat.drop_off"),
+                                self.t("stat.housing"),
+                                st.housing
+                            ),
+                        ));
+                    }
+                    StructureKind::BroodCell => rows.push(row(
+                        "stat.effect",
+                        format!("{} +{}", self.t("stat.housing"), st.housing),
+                    )),
+                    _ => {}
                 }
                 rows.push(row("stat.hotkey", key.to_string()));
                 let gate = if c.tier < st.tier {
@@ -1069,7 +1380,16 @@ impl App {
                         format!("{count} / {}", crate::rules::WAYPOINTS_PER_SPECIES),
                     ));
                 }
-                rows.push(row("stat.hotkey", key.to_string()));
+                rows.push(row(
+                    "stat.hotkey",
+                    format!(
+                        "{key} · {}: {} · Shift {}: {}",
+                        self.t("hud.click"),
+                        self.t("action.set_waypoint"),
+                        self.t("hud.click"),
+                        self.t("action.add_waypoint")
+                    ),
+                ));
                 let state = match sp {
                     Some(s) if w.settings.is_disabled(s) => "disabled",
                     _ => "ready",
@@ -1089,6 +1409,7 @@ impl App {
                     },
                 ));
                 if !max {
+                    tier = Some(u.tier_for(rank));
                     rows.push(row("stat.cost", self.cost_text(&u.cost(rank))));
                     rows.push(row("stat.duration", self.seconds(u.research_ticks(rank))));
                     rows.push(row("stat.tier", u.tier_for(rank).to_string()));
@@ -1150,6 +1471,19 @@ impl App {
                     c.retreat,
                 )
             }
+            Button::AutoScout => {
+                rows.push(row(
+                    "stat.status",
+                    self.t(if c.auto_scout { "on" } else { "off" }),
+                ));
+                rows.push(row("stat.hotkey", key.to_string()));
+                (
+                    self.t("action.auto_scout"),
+                    button_icon(b),
+                    "ready".into(),
+                    c.auto_scout,
+                )
+            }
             Button::Focus(f) => {
                 let weights = f.weights();
                 let split: Vec<String> = Resource::ALL
@@ -1176,16 +1510,32 @@ impl App {
             Button::Waypoint(None) => self.t("action.all_ants"),
             Button::Evolve => self.t("action.evolve"),
             Button::Retreat => self.t("action.retreat"),
+            Button::AutoScout => self.t("action.auto_scout"),
             Button::Focus(_) => self.t("action.gather_focus"),
             _ => String::new(),
+        };
+        // Not enough resources: the state names the first one missing.
+        let (state, state_text) = match state.split_once(':') {
+            Some((s, r)) => (s.to_string(), self.t(&format!("notice.not_enough.{r}"))),
+            None => {
+                let text = self.t(&format!("state.{state}"));
+                (state, text)
+            }
+        };
+        // All Ants shows its short form, ALL, in place of a picture.
+        let (icon, icon_text) = match b {
+            Button::Waypoint(None) => (String::new(), self.t("short.all_ants")),
+            _ => (icon, String::new()),
         };
         json!({
             "id": format!("grid.{i}"),
             "label": label,
             "icon": icon,
+            "icon_text": icon_text,
+            "tier": tier.map(|t| t.to_string()).unwrap_or_default(),
             "key": key,
             "state": state,
-            "state_text": self.t(&format!("state.{state}")),
+            "state_text": state_text,
             "active": active,
             "rows": rows,
             "term": term,
@@ -1226,14 +1576,22 @@ impl App {
         format!("{} {by}", self.t(stat))
     }
 
-    /// "ready", "locked" (tier, hatchery), "disabled", or the resource short.
+    /// "ready", "locked" (tier, hatchery), "disabled", or "unaffordable:"
+    /// and the first resource short.
     fn state_of(&self, gate: Result<(), Refusal>, cost: &[i32; 3], w: &World, me: u8) -> String {
         match gate {
             Err(Refusal::Disabled) => "disabled".into(),
             Err(Refusal::AlreadyQueued) => "queued".into(),
             Err(Refusal::MaxRank) => "max_rank".into(),
             Err(_) => "locked".into(),
-            Ok(()) if !w.can_pay(me, cost) => "unaffordable".into(),
+            Ok(()) if !w.can_pay(me, cost) => {
+                let stock = &w.colonies[me as usize].stock;
+                let short = Resource::ALL
+                    .iter()
+                    .find(|r| stock[r.index()] < cost[r.index()])
+                    .unwrap_or(&Resource::Food);
+                format!("unaffordable:{}", short.key())
+            }
             Ok(()) => "ready".into(),
         }
     }
@@ -1274,21 +1632,33 @@ impl App {
                     .collect()
             }
             "online.room" => {
+                // Typed codes are upper-cased: k7mxp4 joins K7MXP4.
                 self.online.room = value
                     .chars()
                     .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
+                    .map(|c| c.to_ascii_uppercase())
                     .take(32)
                     .collect()
             }
+            "flag.codes" => self.online.codes = value == "on",
             "online.invite" => self.online.invite = value.trim().to_string(),
             "online.reply" => self.online.reply = value.trim().to_string(),
             "online.host" => {
-                let room = format!("{BUILD_ID}-{}", self.room_name());
+                // Host with the field empty fills in a random Room Code.
+                if self.online.room.is_empty() {
+                    self.online.room = self.new_room_code();
+                }
+                let room = format!("{BUILD_ID}-{}", self.online.room);
                 self.host_online(json!({"op": "host_room", "room": room}))
             }
             "online.join" => {
-                let room = format!("{BUILD_ID}-{}", self.room_name());
-                self.join_online(json!({"op": "join_room", "room": room}))
+                if self.online.room.is_empty() {
+                    self.online.status =
+                        format!("{}: {}", self.t("online.room_code"), self.t("stat.none"));
+                } else {
+                    let room = format!("{BUILD_ID}-{}", self.online.room);
+                    self.join_online(json!({"op": "join_room", "room": room}))
+                }
             }
             "online.host_code" => {
                 // Hosting already: a fresh Invite Code for the next joiner.
@@ -1334,6 +1704,27 @@ impl App {
                     g.confirm_concede = false;
                 }
             }
+            "time.pause" => {
+                if let Some(g) = self.game.as_mut().filter(|g| g.time_controls()) {
+                    g.paused = !g.paused;
+                }
+            }
+            "time.scale" => {
+                if let Some(g) = self.game.as_mut().filter(|g| g.time_controls()) {
+                    g.time_scale = (g.time_scale + 1) % TIME_SCALES.len();
+                }
+            }
+            "spectate.vision" => {
+                // Whole map, then each colony's Fog of War in seat order.
+                if let Some(g) = self.game.as_mut().filter(|g| g.spectate) {
+                    let n = g.world.colonies.len() as u8;
+                    g.vision = match g.vision {
+                        None => Some(0),
+                        Some(c) if c + 1 < n => Some(c + 1),
+                        Some(_) => None,
+                    };
+                }
+            }
             "player.edge_pan" => {
                 self.player.edge_pan = value == "on";
                 self.save_settings();
@@ -1361,10 +1752,10 @@ impl App {
                 g.issue(Command::Cancel { structure, slot });
             }
         } else if let Some(rest) = id.strip_prefix("ai.") {
-            if let (Ok(i), Some(d)) = (rest.parse::<usize>(), parse_difficulty(value)) {
-                if (1..=3).contains(&i) {
-                    self.ai_seats[i - 1] = d;
-                }
+            match (rest.parse::<usize>(), parse_difficulty(value)) {
+                (Ok(0), d) if d.is_some() || value == "you" => self.first_seat = d,
+                (Ok(i), Some(d)) if (1..=3).contains(&i) => self.ai_seats[i - 1] = d,
+                _ => {}
             }
         } else if let Some(rest) = id.strip_prefix("seat.") {
             self.lobby_seat(rest, value);
@@ -1391,8 +1782,28 @@ impl App {
         }));
     }
 
+    /// A fresh number from the page's entropy; each call gives another.
+    fn fresh(&mut self) -> u64 {
+        let mut r = Rng::new(self.entropy);
+        let n = ((r.next_u32() as u64) << 32) | r.next_u32() as u64;
+        self.entropy = r.state().max(1);
+        n
+    }
+
+    /// A random Room Code: 6 symbols, without 1, 0, I and O.
+    pub fn new_room_code(&mut self) -> String {
+        let mut r = Rng::new(self.fresh());
+        (0..ROOM_CODE_LEN)
+            .map(|_| ROOM_CODE_SYMBOLS[r.below(ROOM_CODE_SYMBOLS.len() as u32) as usize] as char)
+            .collect()
+    }
+
     fn start_local(&mut self) {
-        let seed = self.seed_text.parse::<u64>().unwrap_or(self.entropy);
+        // No Seed typed: a new random map for every match.
+        let seed = match self.seed_text.parse::<u64>() {
+            Ok(s) => s,
+            Err(_) => self.fresh(),
+        };
         let mut settings = self.setup.clone();
         if settings.biome == Biome::Random {
             settings.biome = if seed.is_multiple_of(2) {
@@ -1401,12 +1812,18 @@ impl App {
                 Biome::FlowerField
             };
         }
-        let mut seats = vec![SeatKind::Human];
+        let mut seats = vec![match self.first_seat {
+            Some(d) => SeatKind::Ai(d),
+            None => SeatKind::Human,
+        }];
         for i in 1..settings.format.seats() {
             seats.push(SeatKind::Ai(self.ai_seats[i - 1]));
         }
         let world = World::new(seed, settings, &seats);
-        self.game = Some(Game::new(world, 0, None));
+        self.game = Some(match self.first_seat {
+            Some(_) => Game::spectating(world),
+            None => Game::new(world, 0, None),
+        });
         self.screen = Screen::Match;
     }
 
@@ -1414,6 +1831,9 @@ impl App {
         let Some(g) = &mut self.game else {
             return;
         };
+        if g.spectate {
+            return;
+        }
         let Some(b) = grid(g.tab).get(i).copied().flatten() else {
             return;
         };
@@ -1436,6 +1856,10 @@ impl App {
             Button::Retreat => {
                 let on = !g.world.colonies[g.me as usize].retreat;
                 g.issue(Command::Retreat { on });
+            }
+            Button::AutoScout => {
+                let on = !g.world.colonies[g.me as usize].auto_scout;
+                g.issue(Command::AutoScout { on });
             }
             Button::Focus(focus) => g.issue(Command::Focus { focus }),
         }
@@ -1531,11 +1955,13 @@ impl App {
                 }
                 Mode::Wall(None) => g.mode = Mode::Wall(Some((cx, cy))),
                 Mode::Waypoint(species) => {
+                    // A plain click replaces the species' waypoints and
+                    // leaves the mode; Shift + click adds one and stays.
                     g.issue(Command::SetWaypoint {
                         species,
                         x: cx,
                         y: cy,
-                        add: false,
+                        add: shift,
                     });
                     if !shift {
                         g.mode = Mode::Idle;
@@ -1664,11 +2090,20 @@ impl App {
             }
         }
         let ms = g.ms_per_tick();
-        g.acc_ms = (g.acc_ms + dt).min(ms * 8);
+        // Pause and Time Scale (local Sandbox or spectated matches only)
+        // scale real time before it reaches the simulation.
+        let (num, den) = if g.time_controls() {
+            TIME_SCALES[g.time_scale]
+        } else {
+            (1, 1)
+        };
+        let paused = g.paused && g.time_controls();
+        let dt = if paused { 0 } else { dt * num / den };
+        g.acc_ms = (g.acc_ms + dt).min(ms * 8 * num);
         match &mut g.lockstep {
             None => {
                 let mut ran = 0;
-                while g.acc_ms >= ms && ran < 5 && g.world.winner.is_none() {
+                while g.acc_ms >= ms && ran < 5 * num && g.world.winner.is_none() {
                     let me = g.me;
                     let cmds: Vec<(u8, Command)> = g.pending.drain(..).map(|c| (me, c)).collect();
                     g.world.step(&cmds, &[]);
@@ -1726,6 +2161,7 @@ impl App {
         let Some(g) = &self.game else {
             return Vec::new();
         };
+        let viewer = g.follow();
         let (cx, cy) = g.mouse_cell();
         let place = match g.mode {
             Mode::Place(kind) => Some((kind, cx, cy, cx, cy)),
@@ -1744,19 +2180,23 @@ impl App {
                 && g.world.can_pay(g.me, &place_cost(kind, x, y, x2, y2)),
         });
         let mouse = g.view.world_at(g.mouse.0, g.mouse.1);
-        let hover_waypoint = g.world.colonies[g.me as usize]
-            .waypoints
-            .iter()
-            .flatten()
-            .copied()
-            .filter(|w| w.dist(mouse) <= 3 * CELL)
-            .min_by_key(|w| w.dist2(mouse));
+        let hover_waypoint = if g.spectate {
+            None
+        } else {
+            g.world.colonies[g.me as usize]
+                .waypoints
+                .iter()
+                .flatten()
+                .copied()
+                .filter(|w| w.dist(mouse) <= 3 * CELL)
+                .min_by_key(|w| w.dist2(mouse))
+        };
         let overlay = Overlay {
             terrain_scale: render::TERRAIN_SCALE,
             place,
             hover_waypoint,
         };
-        render::frame(&g.world, Some(g.me), &g.view, &overlay, g.interp_permille())
+        render::frame(&g.world, viewer, &g.view, &overlay, g.interp_permille())
     }
 
     /// Every interface icon for the local colony's colour, as draw lists:
@@ -1810,8 +2250,12 @@ impl App {
     }
 
     /// Changes every tick: the fog and minimap images are painted again.
+    /// Also changes when a spectator switches whose Fog of War is shown.
     pub fn fog_stamp(&self) -> i32 {
-        self.game.as_ref().map(|g| g.world.tick).unwrap_or(-1)
+        self.game
+            .as_ref()
+            .map(|g| g.world.tick * 8 + g.follow().map_or(0, |c| c as i32 + 1))
+            .unwrap_or(-1)
     }
 
     pub fn fog_size(&self) -> Vec<i32> {
@@ -1823,7 +2267,7 @@ impl App {
 
     pub fn fog(&self) -> Vec<u8> {
         match &self.game {
-            Some(g) => render::fog_image(&g.world, Some(g.me)),
+            Some(g) => render::fog_image(&g.world, g.follow()),
             None => Vec::new(),
         }
     }
@@ -1831,20 +2275,12 @@ impl App {
     /// The minimap, `size` x `size` RGBA.
     pub fn minimap(&self, size: i32) -> Vec<u8> {
         match &self.game {
-            Some(g) => render::minimap(&g.world, Some(g.me), &g.view, size),
+            Some(g) => render::minimap(&g.world, g.follow(), &g.view, size),
             None => Vec::new(),
         }
     }
 
     // ---- online ----
-
-    fn room_name(&self) -> String {
-        if self.online.room.is_empty() {
-            format!("colony-{}", self.entropy % 1_000_000)
-        } else {
-            self.online.room.clone()
-        }
-    }
 
     fn version() -> Version {
         Version::current(BUILD_ID)
@@ -1852,9 +2288,6 @@ impl App {
 
     fn host_online(&mut self, request: Value) {
         self.leave_online();
-        if self.online.room.is_empty() {
-            self.online.room = self.room_name();
-        }
         let settings = serde_json::to_string(&self.defaults).expect("serialises");
         let lobby = Lobby::host(
             App::version(),
@@ -1939,7 +2372,7 @@ impl App {
 
     fn start_online(&mut self) {
         let now = self.now_ms;
-        let seed = self.entropy;
+        let seed = self.fresh();
         let Some(l) = &mut self.online.lobby else {
             return;
         };
@@ -2109,8 +2542,19 @@ fn button_icon(b: Button) -> String {
         Button::Research(u) => format!("upgrade.{}", u.key()),
         Button::Evolve => "action.evolve".into(),
         Button::Retreat => "action.retreat".into(),
+        // No picture of its own yet (render.rs): the fast scout's species.
+        Button::AutoScout => "species.fire".into(),
         Button::Focus(f) => format!("focus.{}", f.key()),
     }
+}
+
+/// "m:ss" from ticks.
+fn clock(ticks: i32) -> String {
+    format!(
+        "{}:{:02}",
+        ticks / TICKS_PER_SECOND / 60,
+        ticks / TICKS_PER_SECOND % 60
+    )
 }
 
 pub fn format_key(f: Format) -> &'static str {
@@ -2205,6 +2649,8 @@ pub fn apply_setting(m: &mut MatchSettings, field: &str, value: &str) -> bool {
             _ => return false,
         },
         "events" => m.events = value == "on",
+        "map_revealed" => m.map_revealed = value == "on",
+        "sandbox" => m.sandbox = value == "on",
         other => {
             let Some(s) = other.strip_prefix("disabled.").and_then(Species::from_key) else {
                 return false;
