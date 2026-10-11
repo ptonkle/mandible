@@ -353,7 +353,7 @@ pub fn generate(seed: u64, settings: &MatchSettings) -> Map {
     }
     cands.sort();
     let mut parent: Vec<usize> = (0..all.len()).collect();
-    fn find(p: &mut Vec<usize>, x: usize) -> usize {
+    fn find(p: &mut [usize], x: usize) -> usize {
         let mut r = x;
         while p[r] != r {
             r = p[r];

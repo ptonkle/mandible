@@ -643,7 +643,7 @@ impl Ranks {
         st.health += st.health * 10 * self.health as i32 / 100;
         if st.gather_ticks > 0 {
             // +20% gather rate per rank: fewer ticks per resource, in tenths.
-            st.gather_ticks = st.gather_ticks * 10;
+            st.gather_ticks *= 10;
             st.gather_ticks = st.gather_ticks * 100 / (100 + 20 * self.gather_rate as i32);
         } else {
             st.gather_ticks *= 10;
@@ -652,7 +652,7 @@ impl Ranks {
             st.carry += 3 * self.carry_capacity as i32;
         }
         if st.build > 0 {
-            st.build = st.build * (2 + self.build_rate as i32);
+            st.build *= 2 + self.build_rate as i32;
         }
         match s {
             Species::Soldier => st.health += 15 * sr,
