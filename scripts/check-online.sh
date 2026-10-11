@@ -19,11 +19,14 @@ fi
 
 step() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
 
-step "1/2 release build (scripts/build.sh, checks web/vendor/SHA256SUMS)"
+step "1/3 release build (scripts/build.sh, checks web/vendor/SHA256SUMS)"
 ./scripts/build.sh >/dev/null
 echo "dist/ assembled"
 
-step "2/2 transport between tabs (tests/browser/online.py)"
+step "2/3 transport between tabs (tests/browser/online.py)"
 "$PY" tests/browser/online.py
+
+step "3/3 a match between two tabs (tests/browser/online_match.py)"
+"$PY" tests/browser/online_match.py
 
 printf '\n\033[1mONLINE CHECK PASSED\033[0m\n'

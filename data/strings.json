@@ -236,5 +236,13 @@
  "speed.word.slow": "Slow",
  "speed.word.normal": "Normal",
  "speed.word.fast": "Fast",
- "speed.word.very_fast": "Very Fast"
+ "speed.word.very_fast": "Very Fast",
+ "online.no_bundle": "Multiplayer Files Missing",
+ "online.no_relay": "Relays Unreachable",
+ "online.no_path": "Players Unreachable",
+ "online.signal_failed": "Connection Failed",
+ "online.wrong_code": "Wrong Code",
+ "online.bad_code": "Unreadable Code",
+ "online.not_hosting": "Host First",
+ "online.no_offer": "Invite Code Missing"
 }

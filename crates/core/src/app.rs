@@ -247,6 +247,8 @@ pub struct Online {
     pub invite: String,
     pub reply: String,
     pub status: String,
+    /// Peers met before the host: told to the lobby once it exists.
+    pub early_peers: Vec<PeerId>,
 }
 
 pub struct App {
@@ -320,6 +322,7 @@ impl App {
                 invite: String::new(),
                 reply: String::new(),
                 status: String::new(),
+                early_peers: Vec::new(),
             },
             client_id: client_id.to_string(),
             now_ms: 0,
@@ -740,11 +743,22 @@ impl App {
         if host {
             row.push(self.button("lobby.start", "menu.start"));
         }
-        vec![
-            json!({"kind": "form", "heading": self.t("online.lobby"), "items": seats}),
-            json!({"kind": "form", "heading": self.t("menu.match_settings"), "items": self.settings_fields(&settings, "lobby", host)}),
-            json!({"kind": "row", "items": row}),
-        ]
+        let mut panels =
+            vec![json!({"kind": "form", "heading": self.t("online.lobby"), "items": seats})];
+        if host {
+            // Pasted codes: one Invite Code per joiner, answered by a Reply Code.
+            panels.push(json!({"kind": "form", "items": [
+                {"type": "code", "id": "online.invite", "label": self.t("online.invite_code"), "value": self.online.invite},
+                {"type": "code", "id": "online.reply", "label": self.t("online.reply_code"), "value": self.online.reply},
+            ]}));
+            panels.push(json!({"kind": "row", "items": [
+                self.button("online.host_code", "online.invite_code"),
+                self.button("online.connect", "online.connect"),
+            ]}));
+        }
+        panels.push(json!({"kind": "form", "heading": self.t("menu.match_settings"), "items": self.settings_fields(&settings, "lobby", host)}));
+        panels.push(json!({"kind": "row", "items": row}));
+        panels
     }
 
     // ---- the match view ----
@@ -1297,9 +1311,28 @@ impl App {
             }
             "online.invite" => self.online.invite = value.trim().to_string(),
             "online.reply" => self.online.reply = value.trim().to_string(),
-            "online.host" => self.host_online(json!({"op": "host_room", "room": self.room_name()})),
-            "online.join" => self.join_online(json!({"op": "join_room", "room": self.room_name()})),
-            "online.host_code" => self.host_online(json!({"op": "host_code"})),
+            "online.host" => {
+                let room = format!("{BUILD_ID}-{}", self.room_name());
+                self.host_online(json!({"op": "host_room", "room": room}))
+            }
+            "online.join" => {
+                let room = format!("{BUILD_ID}-{}", self.room_name());
+                self.join_online(json!({"op": "join_room", "room": room}))
+            }
+            "online.host_code" => {
+                // Hosting already: a fresh Invite Code for the next joiner.
+                let hosting = self
+                    .online
+                    .lobby
+                    .as_ref()
+                    .map(|l| l.is_host())
+                    .unwrap_or(false);
+                if hosting {
+                    self.online.requests.push(json!({"op": "invite_code"}));
+                } else {
+                    self.host_online(json!({"op": "host_code"}));
+                }
+            }
             "online.join_code" => {
                 self.join_online(json!({"op": "join_code", "invite": self.online.invite}))
             }
@@ -1756,6 +1789,7 @@ impl App {
             self.online.requests.push(json!({"op": "leave"}));
         }
         self.online.lobby = None;
+        self.online.early_peers.clear();
     }
 
     fn lobby_seat(&mut self, rest: &str, value: &str) {
@@ -1872,9 +1906,14 @@ impl App {
         self.screen = Screen::Match;
     }
 
-    /// A transport event from the page: kind is "connected", "message" or
-    /// "disconnected"; `text` is the message.
-    pub fn net_event(&mut self, kind: &str, peer: &str, text: &str) {
+    /// A transport event from the page: kind is "connected", "message",
+    /// "disconnected" or "error"; `text` is the message or the error's key;
+    /// `host` says the peer announced itself as the lobby's host.
+    pub fn net_event(&mut self, kind: &str, peer: &str, text: &str, host: bool) {
+        if kind == "error" {
+            self.online.status = self.t(text);
+            return;
+        }
         let now = self.now_ms;
         let peer = PeerId(peer.to_string());
         if let Some(g) = &mut self.game {
@@ -1892,19 +1931,24 @@ impl App {
             }
         }
         match (&mut self.online.lobby, kind) {
-            (None, "connected") => {
-                // Joining: the first peer that answers is the host.
-                let (l, out) = Lobby::join(
+            (None, "connected") if host => {
+                // Joining: the peer that announced itself as host.
+                let (mut l, out) = Lobby::join(
                     App::version(),
                     peer,
                     &self.client_id,
                     &self.t("seat.player"),
                     now,
                 );
-                self.online.lobby = Some(l);
                 self.online.outbox.extend(out);
+                for p in std::mem::take(&mut self.online.early_peers) {
+                    let out = l.peer_connected(p, now);
+                    self.online.outbox.extend(out);
+                }
+                self.online.lobby = Some(l);
                 self.screen = Screen::Lobby;
             }
+            (None, "connected") => self.online.early_peers.push(peer),
             (Some(l), "connected") => {
                 let out = l.peer_connected(peer, now);
                 self.online.outbox.extend(out);

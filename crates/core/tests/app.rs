@@ -35,7 +35,10 @@ fn every_tooltip_is_label_value_pairs() {
                 assert_eq!(pair.len(), 2, "{r}");
                 let label = pair[0].as_str().unwrap();
                 // A label is a short name, never a sentence.
-                assert!(!label.ends_with('.') && label.split(' ').count() <= 3, "{label}");
+                assert!(
+                    !label.ends_with('.') && label.split(' ').count() <= 3,
+                    "{label}"
+                );
             }
         }
     }
@@ -106,7 +109,7 @@ fn placing_a_brood_cell_by_mouse_makes_a_blueprint() {
     a.resize(1000, 800);
     a.act("tab.1", "", false, false);
     a.act("grid.1", "", false, false); // Brood Cell
-    // A free spot near the queen, clicked at its screen position.
+                                       // A free spot near the queen, clicked at its screen position.
     let (sx, sy) = {
         let g = a.game.as_ref().unwrap();
         let q = g.world.queens(0).next().unwrap().pos;

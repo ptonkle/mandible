@@ -71,8 +71,8 @@ impl Game {
         self.s.advance(now_ms as i64)
     }
 
-    pub fn net_event(&mut self, kind: &str, peer: &str, text: &str) {
-        self.s.net_event(kind, peer, text)
+    pub fn net_event(&mut self, kind: &str, peer: &str, text: &str, host: bool) {
+        self.s.net_event(kind, peer, text, host)
     }
 
     pub fn net_code(&mut self, which: &str, code: &str) {

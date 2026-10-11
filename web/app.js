@@ -333,23 +333,35 @@ function resize() {
 }
 
 // ---- transport ----
+// online.js is imported only when a player hosts or joins (PLAN decision 18).
 
 let online = null;
 
+function onNet(e) {
+  game.net_event(e.kind, e.peer || "", e.text || "", !!e.host);
+}
+
 async function netRequest(req) {
-  if (!online) {
-    const module = await import("./online.js");
-    online = module;
+  if (!online) online = await import("./online.js");
+  try {
+    if (req.op === "host_room") await online.hostRoom(req.room, onNet);
+    else if (req.op === "join_room") await online.joinRoom(req.room, onNet);
+    else if (req.op === "host_code") game.net_code("invite", await online.hostByCode(onNet));
+    else if (req.op === "invite_code") game.net_code("invite", await online.inviteByCode());
+    else if (req.op === "join_code") game.net_code("reply", await online.joinByCode(req.invite, onNet));
+    else if (req.op === "accept_reply") await online.acceptAnswer(req.reply);
+    else if (req.op === "leave") online.leave();
+  } catch (err) {
+    game.net_event("error", "", (err && err.message) || "online.signal_failed", false);
   }
-  online.request(req, {
-    event: (kind, peer, text) => game.net_event(kind, peer, text || ""),
-    code: (which, code) => game.net_code(which, code),
-  });
 }
 
 function flushNet() {
   if (!online) return;
-  JSON.parse(game.outbox()).forEach((m) => online.send(m.to, m.text));
+  JSON.parse(game.outbox()).forEach((m) => {
+    if (m.to === null) online.broadcast(m.text);
+    else online.send(m.to, m.text);
+  });
 }
 
 // ---- the loop ----

@@ -101,9 +101,9 @@ impl Session {
         }
     }
 
-    pub fn net_event(&mut self, kind: &str, peer: &str, text: &str) {
+    pub fn net_event(&mut self, kind: &str, peer: &str, text: &str, host: bool) {
         if let Some(a) = &mut self.app {
-            a.net_event(kind, peer, text);
+            a.net_event(kind, peer, text, host);
         }
     }
 
