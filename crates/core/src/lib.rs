@@ -8,6 +8,7 @@
 pub mod api;
 pub mod dice;
 pub mod fixed;
+pub mod lockstep;
 pub mod map;
 pub mod page;
 pub mod rules;
