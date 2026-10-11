@@ -144,7 +144,7 @@ def run(page, check, engine):
     same = page.evaluate("() => window.__hovered === document.querySelector('.gbtn') && window.__hovered.isConnected")
     check(not any(hidden) and same, f"the hovered button is kept and its tooltip stays for 1.5 s {hidden}")
     tier = page.inner_text(".gbtn >> nth=0 >> .tier").strip()
-    check(tier == "1", f"the Queen button shows its tier digit [{tier}]")
+    check(tier == "T1", f"the Queen button shows its tier, T1, as plain text [{tier}]")
 
     # A tooltip in the top bar stays inside the window (row 4). Train Max
     # of Soldier Ants (Shift + W) fills the queue first.
