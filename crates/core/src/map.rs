@@ -455,7 +455,7 @@ pub fn generate(seed: u64, settings: &MatchSettings) -> Map {
     let mut rep_nodes: Vec<NodeSpot> = Vec::new();
     let home = &reps[0];
     let a0 = rng.range(0, 63) as usize;
-    let home_amounts = [2200, 1300, 1600];
+    let home_amounts = [3600, 1800, 2200];
     for (k, res) in Resource::ALL.into_iter().enumerate() {
         let a = (a0 + k * 21) % 64;
         let d = home.r * 6 / 10;

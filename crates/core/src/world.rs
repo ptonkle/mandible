@@ -104,6 +104,12 @@ pub enum Command {
         focus: Focus,
     },
     Concede,
+    /// The AI's own memory, issued only by the AI inside the simulation;
+    /// refused from players.
+    AiState {
+        attacking: bool,
+        wave: i32,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -184,7 +190,10 @@ pub struct Structure {
     pub promised: Cost,
     pub work: i32,
     pub work_done: i32,
+    /// Training, one ant at a time.
     pub lane: Vec<QueueItem>,
+    /// Upgrades and evolutions, one at a time, alongside training.
+    pub research: Vec<QueueItem>,
 }
 
 impl Structure {
@@ -649,6 +658,7 @@ impl World {
             work: st.work * n,
             work_done: if complete { st.work * n } else { 0 },
             lane: Vec::new(),
+            research: Vec::new(),
         });
         if complete && kind == StructureKind::Wall {
             for &(x, y) in &self.structures.last().expect("pushed").cells.clone() {
@@ -732,10 +742,15 @@ impl World {
             Command::Cancel { structure, slot } => {
                 let si = self.structure_index(*structure).ok_or(Refusal::BadPlace)?;
                 let s = &mut self.structures[si];
-                if s.colony != colony || *slot as usize >= s.lane.len() {
+                let slot = *slot as usize;
+                if s.colony != colony || slot >= s.lane.len() + s.research.len() {
                     return Err(Refusal::BadPlace);
                 }
-                let item = s.lane.remove(*slot as usize);
+                let item = if slot < s.lane.len() {
+                    s.lane.remove(slot)
+                } else {
+                    s.research.remove(slot - s.lane.len())
+                };
                 for i in 0..3 {
                     self.colonies[ci].stock[i] += item.cost[i];
                 }
@@ -821,6 +836,14 @@ impl World {
                 self.defeat(colony);
                 Ok(())
             }
+            Command::AiState { attacking, wave } => {
+                if self.colonies[ci].controller == Controller::Human {
+                    return Err(Refusal::BadPlace);
+                }
+                self.colonies[ci].ai.attacking = *attacking;
+                self.colonies[ci].ai.wave = *wave;
+                Ok(())
+            }
         }
     }
 
@@ -855,7 +878,7 @@ impl World {
     }
 
     /// The least-busy complete producer for a piece of work.
-    fn producer(&self, colony: u8, hatchery_for: Option<Species>) -> Option<usize> {
+    fn producer(&self, colony: u8, hatchery_for: Option<Species>, research: bool) -> Option<usize> {
         self.structures
             .iter()
             .enumerate()
@@ -869,7 +892,10 @@ impl World {
             })
             .min_by_key(|(_, s)| {
                 (
-                    s.lane.iter().map(|q| q.total - q.progress).sum::<i32>(),
+                    if research { &s.research } else { &s.lane }
+                        .iter()
+                        .map(|q| q.total - q.progress)
+                        .sum::<i32>(),
                     s.id,
                 )
             })
@@ -918,7 +944,9 @@ impl World {
         let n = want.min(can).min(room);
         let hatch = if s.from_queen() { None } else { Some(s) };
         for _ in 0..n {
-            let pi = self.producer(colony, hatch).ok_or(Refusal::NeedsQueen)?;
+            let pi = self
+                .producer(colony, hatch, false)
+                .ok_or(Refusal::NeedsQueen)?;
             self.pay(colony, &st.cost)?;
             self.structures[pi].lane.push(QueueItem {
                 work: Work::Train(s),
@@ -936,7 +964,7 @@ impl World {
             .structures
             .iter()
             .filter(|s| s.colony == colony)
-            .flat_map(|s| s.lane.iter())
+            .flat_map(|s| s.research.iter())
             .filter(|q| matches!(q.work, Work::Research(x, _) if x == u))
             .count() as u8;
         self.colonies[colony as usize].ranks.get(u) + queued + 1
@@ -970,10 +998,10 @@ impl World {
         let rank = self.can_research(colony, u)?;
         let cost = u.cost(rank);
         let pi = self
-            .producer(colony, u.at_hatchery())
+            .producer(colony, u.at_hatchery(), true)
             .ok_or(Refusal::NeedsQueen)?;
         self.pay(colony, &cost)?;
-        self.structures[pi].lane.push(QueueItem {
+        self.structures[pi].research.push(QueueItem {
             work: Work::Research(u, rank),
             progress: 0,
             total: u.research_ticks(rank),
@@ -986,7 +1014,7 @@ impl World {
         self.structures
             .iter()
             .filter(|s| s.colony == colony)
-            .flat_map(|s| s.lane.iter())
+            .flat_map(|s| s.research.iter())
             .any(|q| matches!(q.work, Work::Evolve(_)))
     }
 
@@ -1007,9 +1035,11 @@ impl World {
     fn evolve(&mut self, colony: u8) -> Result<(), Refusal> {
         let to = self.can_evolve(colony)?;
         let (cost, ticks) = evolve_cost(to);
-        let pi = self.producer(colony, None).ok_or(Refusal::NeedsQueen)?;
+        let pi = self
+            .producer(colony, None, true)
+            .ok_or(Refusal::NeedsQueen)?;
         self.pay(colony, &cost)?;
-        self.structures[pi].lane.push(QueueItem {
+        self.structures[pi].research.push(QueueItem {
             work: Work::Evolve(to),
             progress: 0,
             total: ticks,
@@ -1203,48 +1233,67 @@ impl World {
 
     fn run_lanes(&mut self) {
         for si in 0..self.structures.len() {
-            if !self.structures[si].complete || self.structures[si].lane.is_empty() {
+            if !self.structures[si].complete {
                 continue;
             }
-            let colony = self.structures[si].colony;
-            let work = self.structures[si].lane[0].work;
-            if let Work::Train(sp) = work {
-                if self.population(colony) + sp.stats().pop > self.housing(colony) {
-                    continue; // Housing Full
-                }
+            for research in [false, true] {
+                self.run_queue(si, research);
             }
-            let item = &mut self.structures[si].lane[0];
-            item.progress += 1;
-            if item.progress < item.total {
-                continue;
+        }
+    }
+
+    fn run_queue(&mut self, si: usize, research: bool) {
+        let colony = self.structures[si].colony;
+        let queue = if research {
+            &self.structures[si].research
+        } else {
+            &self.structures[si].lane
+        };
+        let Some(front) = queue.first() else {
+            return;
+        };
+        let work = front.work;
+        if let Work::Train(sp) = work {
+            if self.population(colony) + sp.stats().pop > self.housing(colony) {
+                return; // Housing Full
             }
-            self.structures[si].lane.remove(0);
-            let at = self.structures[si].pos;
-            let ci = colony as usize;
-            match work {
-                Work::Train(sp) => {
-                    self.spawn_ant(colony, sp, at);
-                    self.colonies[ci].tally.trained += 1;
+        }
+        let s = &mut self.structures[si];
+        let queue = if research {
+            &mut s.research
+        } else {
+            &mut s.lane
+        };
+        queue[0].progress += 1;
+        if queue[0].progress < queue[0].total {
+            return;
+        }
+        queue.remove(0);
+        let at = s.pos;
+        let ci = colony as usize;
+        match work {
+            Work::Train(sp) => {
+                self.spawn_ant(colony, sp, at);
+                self.colonies[ci].tally.trained += 1;
+            }
+            Work::Research(u, _) => {
+                let before: Vec<i32> = Species::ALL
+                    .iter()
+                    .map(|s| self.colonies[ci].ranks.apply(*s).health)
+                    .collect();
+                self.colonies[ci].ranks.raise(u);
+                let after: Vec<i32> = Species::ALL
+                    .iter()
+                    .map(|s| self.colonies[ci].ranks.apply(*s).health)
+                    .collect();
+                for a in self.ants.iter_mut().filter(|a| a.colony == colony) {
+                    a.health += after[a.species.index()] - before[a.species.index()];
                 }
-                Work::Research(u, _) => {
-                    let before: Vec<i32> = Species::ALL
-                        .iter()
-                        .map(|s| self.colonies[ci].ranks.apply(*s).health)
-                        .collect();
-                    self.colonies[ci].ranks.raise(u);
-                    let after: Vec<i32> = Species::ALL
-                        .iter()
-                        .map(|s| self.colonies[ci].ranks.apply(*s).health)
-                        .collect();
-                    for a in self.ants.iter_mut().filter(|a| a.colony == colony) {
-                        a.health += after[a.species.index()] - before[a.species.index()];
-                    }
-                    self.announce(&format!("notice.upgraded.{}", u.key()), Some(colony), None);
-                }
-                Work::Evolve(t) => {
-                    self.colonies[ci].tier = t;
-                    self.announce(&format!("notice.evolved.{t}"), Some(colony), None);
-                }
+                self.announce(&format!("notice.upgraded.{}", u.key()), Some(colony), None);
+            }
+            Work::Evolve(t) => {
+                self.colonies[ci].tier = t;
+                self.announce(&format!("notice.evolved.{t}"), Some(colony), None);
             }
         }
     }
@@ -1461,6 +1510,7 @@ impl World {
             h = fnv_i64(h, s.health as i64);
             h = fnv_i64(h, s.work_done as i64);
             h = fnv_i64(h, s.lane.len() as i64);
+            h = fnv_i64(h, s.research.len() as i64);
         }
         for n in &self.nodes {
             h = fnv_i64(h, n.amount as i64);

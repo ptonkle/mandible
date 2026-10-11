@@ -129,7 +129,11 @@ fn saturation_caps_gatherers_per_node() {
         }
     }
     // Only the three home nodes are explored: 3 x 8 gatherers, 6 left idle.
-    assert_eq!(per.values().copied().collect::<Vec<i32>>(), vec![8, 8, 8], "{per:?}");
+    assert_eq!(
+        per.values().copied().collect::<Vec<i32>>(),
+        vec![8, 8, 8],
+        "{per:?}"
+    );
 }
 
 #[test]

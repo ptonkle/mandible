@@ -297,7 +297,21 @@ impl World {
                 return;
             }
             let npos = self.nodes[ni].pos;
-            if a.pos.dist(npos) <= CELL * 3 / 2 + st.radius {
+            let mut in_range = a.pos.dist(npos) <= CELL * 3 / 2 + st.radius;
+            if !in_range {
+                let (x, y) = npos.cell();
+                let key = World::key_for(a, x, y, 1);
+                match self.follow(a, key) {
+                    // The field's goal area is the node's neighbourhood.
+                    Step::Arrived => in_range = true,
+                    Step::Unreachable => {
+                        a.job = Job::Idle;
+                        return;
+                    }
+                    _ => {}
+                }
+            }
+            if in_range {
                 a.gather_acc += 10;
                 let res = self.nodes[ni].resource.index();
                 while a.gather_acc >= st.gather_ticks.max(1)
@@ -311,12 +325,6 @@ impl World {
                 if a.carried() >= st.carry || self.nodes[ni].amount <= 0 {
                     a.job = Job::Deliver;
                     a.gather_acc = 0;
-                }
-            } else {
-                let (x, y) = npos.cell();
-                let key = World::key_for(a, x, y, 1);
-                if matches!(self.follow(a, key), Step::Unreachable) {
-                    a.job = Job::Idle;
                 }
             }
             return;
