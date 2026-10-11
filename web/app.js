@@ -155,6 +155,26 @@ function element(item) {
     wrap.append(make("label", "", item.label), box);
     return wrap;
   }
+  if (item.type === "slider") {
+    // The core gives the range and step; the page only shows them. The
+    // value is sent when the slider is released, so a redraw never ends
+    // a drag.
+    const wrap = make("div", "field slider");
+    const label = make("label", "", item.label);
+    if (hints[item.label]) label.dataset.term = item.label;
+    const input = make("input");
+    input.type = "range";
+    input.id = item.id;
+    input.setAttribute("min", item.min);
+    input.setAttribute("max", item.max);
+    input.setAttribute("step", item.step);
+    input.value = item.value;
+    const shown = make("span", "slider-value", item.text);
+    input.addEventListener("change", () => send(item.id, input.value));
+    label.htmlFor = item.id;
+    wrap.append(label, input, shown);
+    return wrap;
+  }
   if (item.type === "keybind") {
     const wrap = make("div", "keybind");
     const b = make("button", "", item.key);

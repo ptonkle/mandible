@@ -865,3 +865,34 @@ fn training_with_no_housing_room_plays_a_warning_once() {
         "Volume Off is silent"
     );
 }
+
+#[test]
+fn volume_is_a_slider_in_player_settings_and_the_match_menu() {
+    let mut a = app();
+    a.act("go.player_settings", "", false, false);
+    let ui = a.ui();
+    let sliders: Vec<&serde_json::Value> = ui["panels"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|p| p["items"].as_array().unwrap().iter())
+        .filter(|i| i["type"] == "slider")
+        .collect();
+    assert_eq!(sliders.len(), 1);
+    assert_eq!(sliders[0]["id"], "player.volume");
+    assert_eq!(sliders[0]["value"], 70, "Normal by default");
+    a.act("player.volume", "45", false, false);
+    assert_eq!(a.player.volume, 45);
+    a.act("go.main_menu", "", false, false);
+    start_match(&mut a);
+    a.key("Escape", true, false, false);
+    let ui = a.ui();
+    let menu = ui["match"]["menu"]["items"].as_array().unwrap();
+    assert!(
+        menu.iter().any(|i| i["type"] == "slider" && i["value"] == 45),
+        "the in-match Menu has the Volume slider: {menu:?}"
+    );
+    // Settings saved with the old 4-step Volume convert to percent.
+    let old = tool_core::keys::PlayerSettings::parse(r#"{"volume": 1}"#).unwrap();
+    assert_eq!(old.volume, 35);
+}

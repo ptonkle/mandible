@@ -185,6 +185,13 @@ def run(page, check, engine):
     played = page.evaluate("() => document.body.dataset.sound || ''")
     check(played == "warning", f"training past housing plays the Warning sound [{played}]")
 
+    # The Volume slider is in the in-match Menu (and in Player Settings).
+    page.mouse.move(700, 400)
+    page.keyboard.press("Escape")
+    page.wait_for_selector("#overlay input[type=range]", timeout=5000)
+    check(page.locator("#overlay input[type=range]").count() == 1, "the in-match Menu has a Volume slider")
+    page.keyboard.press("Escape")
+
     # Esc opens the menu; Concede ends the match in Defeat.
     page.mouse.move(700, 400)
     page.keyboard.press("Escape")

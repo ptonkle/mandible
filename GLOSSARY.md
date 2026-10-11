@@ -265,7 +265,7 @@ Rejected names. Do not reuse them without passing the naming test.
 | Grid Tab | ◆ | One page of the action grid, if there are more actions than buttons (for example Ants, Queens, Upgrades). *Still open.* | page, menu, category |
 | Ants, Build, Waypoints, Upgrades, Colony | ◆ | The five grid tabs, on keys 1–5. | units, buildings, research, economy |
 | Pan, Edge Pan | ◆ | Moving the view: Pan with the arrow keys or by dragging; Edge Pan moves it when the pointer touches the screen edge. | scroll, camera move |
-| Volume | ◆ | The Player Setting for how loud the game's sounds are: Off, Low, Normal, High. | sound level, loudness |
+| Volume | ◆ | How loud the game's sounds are: a slider from 0% to 100% (steps of 5), in Player Settings and in the in-match Menu. | sound level, loudness |
 | Benchmark | ★ | The Player Settings button that runs the performance-test scenario live, with its budget. | perf test, stress test |
 | Frames per second, Tick average, Tick worst, Draw average, Budget, Measuring, Within budget, Over budget | ◆ | The Benchmark panel's labels and states: drawing rate; simulation time per tick (average and worst); drawing time per frame; the budget (tick under 8 ms, 60 frames per second); and whether the run is inside it. | FPS, lag, performance score |
 | Hotkey | ★ | The key that triggers an action button. It follows the button's position on the keyboard. | shortcut, keybind (that is the setting), key |

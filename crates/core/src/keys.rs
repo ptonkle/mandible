@@ -89,7 +89,8 @@ pub struct PlayerSettings {
     /// An index into `EDGE_PAN_SPEEDS`; settings saved before it was added
     /// read as Normal.
     pub edge_pan_speed: usize,
-    /// Sound volume step: 0 Off, 1 Low, 2 Normal, 3 High.
+    /// Sound volume in percent, 0–100, set with a slider. Settings saved
+    /// when it was a 4-step choice (0–3) are converted on load.
     pub volume: u8,
     /// Player Name, shown in the Lobby and in Waiting On; empty means the
     /// default ("Player").
@@ -102,7 +103,7 @@ impl Default for PlayerSettings {
             keys: Vec::new(),
             edge_pan: true,
             edge_pan_speed: 2,
-            volume: 2,
+            volume: 70,
             name: String::new(),
         }
     }
@@ -110,7 +111,12 @@ impl Default for PlayerSettings {
 
 impl PlayerSettings {
     pub fn parse(json: &str) -> Result<PlayerSettings, String> {
-        let p: PlayerSettings = serde_json::from_str(json).map_err(|e| e.to_string())?;
+        let mut p: PlayerSettings = serde_json::from_str(json).map_err(|e| e.to_string())?;
+        // The old 4-step Volume (Off, Low, Normal, High) as percent.
+        if p.volume <= 3 {
+            p.volume = crate::sound::volume_percent(p.volume) as u8;
+        }
+        p.volume = p.volume.min(100);
         for (slot, _) in &p.keys {
             if !all_slots().contains(&slot.as_str()) {
                 return Err(format!("Keybinds: unknown slot {slot}"));

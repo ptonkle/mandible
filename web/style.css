@@ -275,3 +275,9 @@ table.cells td { padding: 0.15rem 0.5rem 0.15rem 0; }
 table.cells select { width: 100%; }
 .button.active { background: var(--leaf); }
 .button:disabled { opacity: 0.45; cursor: default; }
+
+/* Volume slider: label, range, percent. */
+.field.slider { grid-template-columns: 9.5rem 1fr 3rem; }
+.field.slider input[type=range] { width: 100%; accent-color: var(--accent); }
+.slider-value { color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
+.overlay .field.slider { min-width: 18rem; }

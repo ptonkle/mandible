@@ -789,18 +789,7 @@ impl App {
                     vec![("on".into(), self.t("on")), ("off".into(), self.t("off"))],
                     if self.player.edge_pan { "on" } else { "off" },
                 ));
-                rows.push(
-                    self.select(
-                        "player.volume",
-                        "keys.volume",
-                        ["off", "level.low", "level.normal", "level.high"]
-                            .iter()
-                            .enumerate()
-                            .map(|(i, k)| (i.to_string(), self.t(k)))
-                            .collect(),
-                        &self.player.volume.to_string(),
-                    ),
-                );
+                rows.push(self.volume_slider());
                 let speeds = crate::keys::EDGE_PAN_SPEEDS
                     .iter()
                     .map(|(k, _)| (k.to_string(), self.t(&format!("speed.word.{k}"))))
@@ -1165,6 +1154,13 @@ impl App {
             } else {
                 json!({"items": [self.button("menu.resume", "menu.resume"), self.button("menu.concede", "menu.concede")]})
             };
+            // Volume is in the Menu too, so it can change mid-match.
+            if !g.confirm_concede {
+                let slider = self.volume_slider();
+                if let Some(items) = v["menu"]["items"].as_array_mut() {
+                    items.push(slider);
+                }
+            }
         }
         v
     }
@@ -2076,7 +2072,9 @@ impl App {
             }
             "player.volume" => {
                 if let Ok(v) = value.parse::<u8>() {
-                    self.player.volume = v.min(3);
+                    // Multiples of the slider's step only, so a stored 1–3
+                    // can never be mistaken for the old 4-step setting.
+                    self.player.volume = (v.min(100) / VOLUME_STEP) * VOLUME_STEP;
                     self.save_settings();
                     self.cue(Cue::Click);
                 }
@@ -2542,6 +2540,20 @@ impl App {
 
     // ---- sound ----
 
+    /// The Volume slider, 0–100%, for Player Settings and the in-match Menu.
+    fn volume_slider(&self) -> Value {
+        json!({
+            "type": "slider",
+            "id": "player.volume",
+            "label": self.t("keys.volume"),
+            "value": self.player.volume,
+            "min": 0,
+            "max": 100,
+            "step": VOLUME_STEP,
+            "text": format!("{}%", self.player.volume),
+        })
+    }
+
     /// Queues a sound unless it played within its cooldown.
     pub fn cue(&mut self, c: Cue) {
         let last = self.last_cue.get(&c).copied();
@@ -2597,7 +2609,7 @@ impl App {
     /// The WAV file for a sound, at the Player Settings volume.
     pub fn sound(&self, key: &str) -> Vec<u8> {
         match Cue::from_key(key) {
-            Some(c) => crate::sound::wav(c, crate::sound::volume_percent(self.player.volume)),
+            Some(c) => crate::sound::wav(c, self.player.volume as i32),
             None => Vec::new(),
         }
     }
@@ -3189,6 +3201,9 @@ fn clock(ticks: i32) -> String {
         ticks / TICKS_PER_SECOND % 60
     )
 }
+
+/// The Volume slider moves in steps of this many percent.
+pub const VOLUME_STEP: u8 = 5;
 
 pub fn format_key(f: Format) -> &'static str {
     match f {
