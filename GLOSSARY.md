@@ -306,6 +306,8 @@ Rejected names. Do not reuse them without passing the naming test.
 | Menu | ◆ | The in-match menu (Esc): Resume, Concede. | pause menu, options |
 | Resume | ◆ | Close the Menu and carry on. | continue, unpause |
 | Map Size, Chamber Size | ★ | Match Settings for the size of the map and of its chambers: Small, Normal or Large. | map scale, room size |
+| Map Type | ★ | The Match Setting for the map's shape: Tunnels, Open Ground or Maze. Every type is rotation-symmetric, keeps every home reachable without digging, and keeps the narrowest gap at least the Tunnel Width. | map style, layout, terrain type |
+| Tunnels, Open Ground, Maze | ★ | The three Map Types. Tunnels: chambers joined by tunnels. Open Ground: open ground with blobs of rock. Maze: open ground crossed by thin, connected rock walls with gaps; some wall stretches are dirt. "Open Ground" is never shortened to "Open", which is a lobby seat state. | caves, arena, labyrinth, open map |
 | Hill Won, Hill Ended | ◆ | Announcements when a Hill closes: won by a team, or ended with no single holder. | captured, tied |
 | Play vs AI | ★ | Main-menu choice: a local match against AI players. | skirmish, single player, practice |
 | Online Multiplayer | ★ | Main-menu choice: create or join a lobby. | online, PvP, versus |

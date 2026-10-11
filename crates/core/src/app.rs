@@ -23,8 +23,8 @@ use crate::rules::{
     evolve_cost, Resource, Role, Species, StructureKind, Upgrade, TICKS_PER_SECOND,
 };
 use crate::settings::{
-    can_disable, Biome, Difficulty, Format, GameSpeed, Level, MatchSettings, SeatKind, TUNNEL_MAX,
-    TUNNEL_MIN,
+    can_disable, Biome, Difficulty, Format, GameSpeed, Level, MapType, MatchSettings, SeatKind,
+    TUNNEL_MAX, TUNNEL_MIN,
 };
 use crate::world::{Amount, Command, Controller, Focus, Refusal, Work, World, HILL_REWARD};
 
@@ -516,6 +516,10 @@ impl App {
                     self.t(&format!("biome.{}", biome_key(m.biome))),
                 ),
                 (
+                    self.t("setting.map_type"),
+                    self.t(&format!("map_type.{}", map_type_key(m.map_type))),
+                ),
+                (
                     self.t("setting.events"),
                     self.t(if m.events { "on" } else { "off" }),
                 ),
@@ -589,6 +593,15 @@ impl App {
                     .map(|v| (v.to_string(), self.t(&format!("biome.{v}"))))
                     .collect(),
                 biome_key(m.biome),
+            ),
+            self.select(
+                &format!("{prefix}.map_type"),
+                "setting.map_type",
+                ["tunnels", "open", "maze"]
+                    .iter()
+                    .map(|v| (v.to_string(), self.t(&format!("map_type.{v}"))))
+                    .collect(),
+                map_type_key(m.map_type),
             ),
             self.select(
                 &format!("{prefix}.events"),
@@ -2598,6 +2611,14 @@ fn speed_key(s: GameSpeed) -> &'static str {
     }
 }
 
+fn map_type_key(t: MapType) -> &'static str {
+    match t {
+        MapType::Tunnels => "tunnels",
+        MapType::Open => "open",
+        MapType::Maze => "maze",
+    }
+}
+
 fn biome_key(b: Biome) -> &'static str {
     match b {
         Biome::Picnic => "picnic",
@@ -2671,6 +2692,12 @@ pub fn apply_setting(m: &mut MatchSettings, field: &str, value: &str) -> bool {
             "picnic" => m.biome = Biome::Picnic,
             "flower_field" => m.biome = Biome::FlowerField,
             "random" => m.biome = Biome::Random,
+            _ => return false,
+        },
+        "map_type" => match value {
+            "tunnels" => m.map_type = MapType::Tunnels,
+            "open" => m.map_type = MapType::Open,
+            "maze" => m.map_type = MapType::Maze,
             _ => return false,
         },
         "events" => m.events = value == "on",

@@ -264,5 +264,9 @@
  "time.scale.2": "×2",
  "time.scale.3": "×4",
  "short.tier": "T",
- "keys.pause": "Pause"
+ "keys.pause": "Pause",
+ "setting.map_type": "Map Type",
+ "map_type.tunnels": "Tunnels",
+ "map_type.open": "Open Ground",
+ "map_type.maze": "Maze"
 }

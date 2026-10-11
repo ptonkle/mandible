@@ -57,5 +57,8 @@
  "Spectating": "No seat is You: you watch the match.",
  "Pause": "Stops time in a Sandbox match or while Spectating.",
  "Time Scale": "Runs time at ×½, ×1, ×2 or ×4 in a Sandbox match or while Spectating.",
- "Fog of War": "Everything a colony cannot see right now. Off shows the whole map."
+ "Fog of War": "Everything a colony cannot see right now. Off shows the whole map.",
+ "Map Type": "The shape of the map: Tunnels, Open Ground or Maze.",
+ "Open Ground": "A Map Type: open ground with blobs of rock.",
+ "Maze": "A Map Type: open ground crossed by thin rock walls, with gaps."
 }

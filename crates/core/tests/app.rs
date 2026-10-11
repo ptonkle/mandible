@@ -530,3 +530,20 @@ fn tooltips_show_real_seconds_whatever_the_tick_rate() {
         .to_string();
     assert_eq!(rate, "3.3/s");
 }
+
+#[test]
+fn map_type_is_a_saved_match_setting_that_reaches_the_match() {
+    let mut a = app();
+    a.act("go.match_settings", "", false, false);
+    a.act("def.map_type", "maze", false, false);
+    let saved = a.ui()["save"]["defaults"].as_str().unwrap().to_string();
+    assert!(saved.contains("\"map_type\":\"maze\""), "{saved}");
+    a.act("def.map_type", "nonsense", false, false);
+    assert_eq!(a.defaults.map_type, tool_core::settings::MapType::Maze);
+    a.act("go.main_menu", "", false, false);
+    start_match(&mut a);
+    assert_eq!(
+        a.game.as_ref().unwrap().world.settings.map_type,
+        tool_core::settings::MapType::Maze
+    );
+}
