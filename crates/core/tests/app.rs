@@ -547,3 +547,292 @@ fn map_type_is_a_saved_match_setting_that_reaches_the_match() {
         tool_core::settings::MapType::Maze
     );
 }
+
+// ---- play-test fixes (TRIAGE rows 39, 48, 53, 55, 56, 57) ----
+
+fn stat(a: &mut App, key: &str) -> String {
+    let ui = a.ui();
+    ui["match"]["hud"]["stats"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["key"] == key)
+        .map(|s| s["value"].as_str().unwrap().to_string())
+        .unwrap_or_default()
+}
+
+/// Runs the match `ms` milliseconds of real time, 100 ms per frame.
+fn run(a: &mut App, ms: i64) {
+    for _ in 0..ms / 100 {
+        let now = a.now_ms + 100;
+        a.advance(now);
+    }
+}
+
+#[test]
+fn the_top_bar_counts_combat_ants_out_now_apart_from_the_queue() {
+    let mut a = app();
+    start_match(&mut a);
+    // A colony starts with 2 Soldier Ants, Pop Cost 1 each; Harvester and
+    // Carpenter Ants are not combat ants.
+    assert_eq!(stat(&mut a, "combat_ants"), "2 · Pop Cost 2");
+    // A queued Soldier Ant is not counted until it is trained.
+    a.act("tab.0", "", false, false);
+    a.act("grid.1", "", false, false);
+    run(&mut a, 300);
+    assert_eq!(a.ui()["match"]["queue"].as_array().unwrap().len(), 1);
+    assert_eq!(stat(&mut a, "combat_ants"), "2 · Pop Cost 2");
+    run(&mut a, 20_000);
+    assert_eq!(stat(&mut a, "combat_ants"), "3 · Pop Cost 3");
+}
+
+#[test]
+fn queued_upgrades_show_rank_and_stat_and_tell_colony_from_species() {
+    let mut a = app();
+    a.act("go.play_vs_ai", "", false, false);
+    a.act("pva.sandbox", "on", false, false);
+    a.act("pva.start", "", false, false);
+    a.act("tab.3", "", false, false);
+    a.act("grid.0", "", false, false); // Damage: a Colony Upgrade
+    a.act("grid.1", "", false, false); // Soldier Ant Health: a Species Upgrade
+    run(&mut a, 200);
+    let q = a.ui()["match"]["queue"].as_array().unwrap().clone();
+    let find = |label: &str| {
+        q.iter()
+            .find(|i| i["label"] == label)
+            .unwrap_or_else(|| panic!("{label} in {q:?}"))
+            .clone()
+    };
+    let damage = find("Damage I");
+    assert_eq!(damage["kind"], "colony_upgrade");
+    assert_eq!(damage["rank"], "I");
+    assert_eq!(damage["short"], "Damage");
+    let health = find("Soldier Ant Health I");
+    assert_eq!(health["kind"], "species_upgrade");
+    assert_eq!(health["rank"], "I");
+    assert_eq!(health["short"], "Health");
+    let rows = rows_of(&damage);
+    assert!(rows.contains(&("Rank".into(), "I".into())), "{rows:?}");
+    assert!(rows.contains(&("Upgrade".into(), "Colony Upgrade".into())));
+    assert!(rows_of(&health).contains(&("Upgrade".into(), "Species Upgrade".into())));
+}
+
+#[test]
+fn tab_sets_the_all_ants_waypoint_from_any_grid_tab_and_can_be_remapped() {
+    let mut a = app();
+    start_match(&mut a);
+    a.resize(1000, 800);
+    a.act("tab.0", "", false, false);
+    a.key("Tab", true, false, false);
+    {
+        let g = a.game.as_ref().unwrap();
+        assert_eq!(g.mode, tool_core::app::Mode::Waypoint(None));
+        assert_eq!(g.tab, 0, "the Ants tab stays open");
+    }
+    assert_eq!(a.ui()["match"]["mode"], "waypoint");
+    a.mouse("mousedown", 0, 400, 400, false);
+    run(&mut a, 200);
+    let c = &a.game.as_ref().unwrap().world.colonies[0];
+    // Every combat species gets the waypoint; Harvester Ants do not.
+    assert!(!c.waypoints[Species::Soldier.index()].is_empty());
+    assert!(!c.waypoints[Species::Fire.index()].is_empty());
+    assert!(c.waypoints[Species::Harvester.index()].is_empty());
+    // The All Ants button's Hotkey row names Tab too.
+    let b = button(&mut a, 2, 0);
+    let hotkey = rows_of(&b)
+        .into_iter()
+        .find(|(l, _)| l == "Hotkey")
+        .unwrap()
+        .1;
+    assert!(hotkey.starts_with("Q · Tab · "), "{hotkey}");
+    // Remapped in Keybinds, and saved.
+    a.act("go.main_menu", "", false, false);
+    a.act("go.player_settings", "", false, false);
+    a.act("bind.all_ants", "", false, false);
+    assert_eq!(a.ui()["keys_captured"], true);
+    a.key("KeyG", true, false, false);
+    assert_eq!(a.player.key_of("all_ants"), "KeyG");
+    let ui = a.ui();
+    assert_eq!(ui["keys_captured"], false);
+    assert!(ui["save"]["player"].as_str().unwrap().contains("KeyG"));
+}
+
+#[test]
+fn edge_pan_speed_is_a_saved_player_setting_that_scales_edge_pan() {
+    // The view's move over 100 ms with the pointer at the left or right
+    // edge, toward the middle of the map so it never meets the map's side.
+    let moved = |speed: &str| {
+        let mut a = app();
+        a.act("go.player_settings", "", false, false);
+        a.act("player.edge_pan_speed", speed, false, false);
+        let saved = a.ui()["save"]["player"].as_str().unwrap().to_string();
+        assert!(saved.contains("\"edge_pan_speed\""), "{saved}");
+        a.act("go.main_menu", "", false, false);
+        start_match(&mut a);
+        a.resize(1000, 800);
+        let g = a.game.as_ref().unwrap();
+        let left_half = g.view.centre_x < g.world.map.w * tool_core::fixed::CELL / 2;
+        let x = if left_half { 999 } else { 1 };
+        a.mouse("mousemove", 0, x, 400, false);
+        let before = a.game.as_ref().unwrap().view.centre_x;
+        run(&mut a, 100);
+        (a.game.as_ref().unwrap().view.centre_x - before).abs()
+    };
+    let slow = moved("very_slow");
+    let fast = moved("very_fast");
+    // Very Slow is 300 pixels a second and Very Fast 1,800: six times as far.
+    assert!(slow > 0);
+    assert!((fast - 6 * slow).abs() <= 6, "slow {slow}, fast {fast}");
+    // An unknown value changes nothing.
+    let mut a = app();
+    a.act("player.edge_pan_speed", "warp", false, false);
+    assert_eq!(a.player.edge_pan_speed, 2);
+}
+
+#[test]
+fn keybinds_name_tabs_and_buttons_as_in_the_match() {
+    let mut a = app();
+    a.act("go.player_settings", "", false, false);
+    let ui = a.ui();
+    let items = ui["panels"][0]["items"].as_array().unwrap();
+    let labels: Vec<&str> = items.iter().filter_map(|i| i["label"].as_str()).collect();
+    for want in [
+        "Action Button Q",
+        "Action Button D",
+        "Action Button V",
+        "Grid Tab: Ants",
+        "Grid Tab: Build",
+        "Grid Tab: Waypoints",
+        "Grid Tab: Upgrades",
+        "Grid Tab: Colony",
+        "Set Waypoint: All Ants",
+        "Edge Pan Speed",
+    ] {
+        assert!(labels.contains(&want), "{want} in {labels:?}");
+    }
+    assert!(!labels.iter().any(|l| l.starts_with("Grid Tab 1")));
+    // The All Ants hotkey is listed right after the five tabs.
+    let at = |l: &str| labels.iter().position(|x| *x == l).unwrap();
+    assert_eq!(at("Set Waypoint: All Ants"), at("Grid Tab: Colony") + 1);
+}
+
+#[test]
+fn the_end_screen_graphs_every_colony_and_summarises_each() {
+    let mut a = app();
+    start_match(&mut a);
+    // 35 seconds of match: Samples at 10, 20 and 30 s.
+    {
+        let g = a.game.as_mut().unwrap();
+        for _ in 0..tool_core::world::SAMPLE_TICKS * 7 / 2 {
+            g.world.step(&[], &[]);
+        }
+    }
+    a.key("Escape", true, false, false);
+    a.act("menu.concede", "", false, false);
+    a.act("menu.concede_yes", "", false, false);
+    run(&mut a, 300);
+    let ui = a.ui();
+    let end = &ui["match"]["end"];
+    assert_eq!(end["title"], "Defeat");
+    let tabs: Vec<&str> = end["tabs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["text"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        tabs,
+        [
+            "Food",
+            "Nectar",
+            "Leaves",
+            "Combat Ants",
+            "Population",
+            "Killed",
+            "Lost"
+        ]
+    );
+    assert_eq!(end["tabs"][0]["active"], true);
+    let graph = &end["graph"];
+    assert_eq!(graph["title"], "Gathered: Food");
+    let (gw, gh) = (tool_core::app::GRAPH_W, tool_core::app::GRAPH_H);
+    assert_eq!(graph["view_box"], format!("0 0 {gw} {gh}"));
+    // One line per colony, Red then Blue, in its player color.
+    let lines = graph["lines"].as_array().unwrap();
+    assert_eq!(lines.len(), 2);
+    assert_eq!(lines[0]["colour"], "#f0302a");
+    assert_eq!(lines[1]["colour"], "#2f7cff");
+    for l in lines {
+        let d = l["d"].as_str().unwrap();
+        assert!(d.starts_with("M "), "{d}");
+        // The start (0 Food gathered at 0:00) and three Samples.
+        let nums: Vec<i32> = d.split(' ').filter_map(|t| t.parse().ok()).collect();
+        assert_eq!(nums.len(), 8, "{d}");
+        for p in nums.chunks(2) {
+            assert!((0..=gw).contains(&p[0]) && (0..=gh).contains(&p[1]), "{d}");
+        }
+        // Time runs left to right.
+        assert!(nums[0] < nums[2] && nums[2] < nums[4] && nums[4] < nums[6]);
+    }
+    // Every colony's summary, You marked.
+    let cols: Vec<&str> = end["columns"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["text"].as_str().unwrap())
+        .collect();
+    assert_eq!(cols, ["Red · You", "Blue"]);
+    let summary = end["summary"].as_array().unwrap();
+    let labels: Vec<&str> = summary
+        .iter()
+        .map(|r| r["label"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        labels,
+        [
+            "Trained",
+            "Killed",
+            "Lost",
+            "Gathered: Food",
+            "Gathered: Nectar",
+            "Gathered: Leaves"
+        ]
+    );
+    assert!(summary
+        .iter()
+        .all(|r| r["values"].as_array().unwrap().len() == 2));
+    // The Population tab: a round scale (1, 2 or 5 times a power of ten)
+    // at least the largest Population in the match.
+    a.act("end.graph.4", "", false, false);
+    let ui = a.ui();
+    let end = &ui["match"]["end"];
+    assert_eq!(end["tabs"][4]["active"], true);
+    assert_eq!(end["graph"]["title"], "Population");
+    let g = a.game.as_ref().unwrap();
+    let most = g
+        .world
+        .colonies
+        .iter()
+        .flat_map(|c| c.history.iter().map(|s| s.population))
+        .max()
+        .unwrap();
+    // The scale's labels sit left of the plot, right-aligned.
+    let scale: Vec<i32> = end["graph"]["labels"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|l| l["anchor"] == "end" && l["x"].as_i64().unwrap() < 60)
+        .map(|l| l["text"].as_str().unwrap().parse().unwrap())
+        .collect();
+    let top = *scale.iter().max().unwrap();
+    assert!(top >= most && top < most * 5, "scale {top} for {most}");
+    // Half the scale is marked only when it is a whole number.
+    assert_eq!(scale.contains(&(top / 2)), top % 2 == 0, "{scale:?}");
+    let digits = top.to_string();
+    assert!(["1", "2", "5"].contains(&&digits[..1]) && digits[1..].chars().all(|c| c == '0'));
+    a.act("end.graph.3", "", false, false);
+    assert_eq!(
+        a.ui()["match"]["end"]["graph"]["title"],
+        "Combat Ants: Pop Cost"
+    );
+}

@@ -26,7 +26,9 @@ use crate::settings::{
     can_disable, Biome, Difficulty, Format, GameSpeed, Level, MapType, MatchSettings, SeatKind,
     TUNNEL_MAX, TUNNEL_MIN,
 };
-use crate::world::{Amount, Command, Controller, Focus, Refusal, Work, World, HILL_REWARD};
+use crate::world::{
+    Amount, Command, Controller, Focus, Refusal, Sample, Work, World, HILL_REWARD, SAMPLE_TICKS,
+};
 
 /// Peers with different builds refuse each other; raise on every release
 /// that changes the simulation or the wire.
@@ -175,6 +177,8 @@ pub struct Game {
     /// Pause and Time Scale: local matches only (Sandbox or Spectate).
     pub paused: bool,
     pub time_scale: usize,
+    /// The end screen's graph tab: an index into `END_GRAPHS`.
+    pub end_graph: usize,
 }
 
 impl Game {
@@ -205,6 +209,7 @@ impl Game {
             vision: None,
             paused: false,
             time_scale: 1,
+            end_graph: 0,
         }
     }
 
@@ -420,6 +425,9 @@ impl App {
                 Screen::Match => "match",
             },
             "title": self.t("title"),
+            // Keybinds is waiting for a key: the page keeps Tab, Space and
+            // Enter from moving focus or pressing a button.
+            "keys_captured": self.rebinding.is_some(),
         });
         match self.screen {
             Screen::Match => {
@@ -705,18 +713,38 @@ impl App {
             }
             Screen::PlayerSettings => {
                 let mut rows = Vec::new();
-                for slot in crate::keys::all_slots() {
-                    let label = if let Some(n) = slot.strip_prefix("grid.") {
+                // The All Ants hotkey sits with the grid tabs it works from.
+                let mut slots: Vec<&str> = crate::keys::all_slots()
+                    .into_iter()
+                    .filter(|s| *s != "all_ants")
+                    .collect();
+                let after_tabs = slots
+                    .iter()
+                    .position(|s| *s == "tab.4")
+                    .map_or(0, |i| i + 1);
+                slots.insert(after_tabs, "all_ants");
+                for slot in slots {
+                    // Named as in the match (TRIAGE row 57): a grid button
+                    // by its default key, "Action Button Q"; a tab by its
+                    // name, "Grid Tab: Ants".
+                    let label = if slot.starts_with("grid.") {
                         format!(
                             "{} {}",
                             self.t("keys.grid"),
-                            n.parse::<i32>().unwrap_or(0) + 1
+                            crate::keys::default_label(slot)
                         )
                     } else if let Some(n) = slot.strip_prefix("tab.") {
+                        let i = n.parse::<usize>().unwrap_or(0).min(TABS.len() - 1);
                         format!(
-                            "{} {}",
+                            "{}: {}",
                             self.t("keys.tab"),
-                            n.parse::<i32>().unwrap_or(0) + 1
+                            self.t(&format!("tab.{}", TABS[i]))
+                        )
+                    } else if slot == "all_ants" {
+                        format!(
+                            "{}: {}",
+                            self.t("action.set_waypoint"),
+                            self.t("action.all_ants")
                         )
                     } else {
                         self.t(&format!("keys.{slot}"))
@@ -733,6 +761,19 @@ impl App {
                     "keys.edge_pan",
                     vec![("on".into(), self.t("on")), ("off".into(), self.t("off"))],
                     if self.player.edge_pan { "on" } else { "off" },
+                ));
+                let speeds = crate::keys::EDGE_PAN_SPEEDS
+                    .iter()
+                    .map(|(k, _)| (k.to_string(), self.t(&format!("speed.word.{k}"))))
+                    .collect();
+                let speed = crate::keys::EDGE_PAN_SPEEDS
+                    .get(self.player.edge_pan_speed)
+                    .map_or("normal", |(k, _)| *k);
+                rows.push(self.select(
+                    "player.edge_pan_speed",
+                    "keys.edge_pan_speed",
+                    speeds,
+                    speed,
                 ));
                 vec![
                     json!({"kind": "form", "heading": self.t("keys.title"), "items": rows}),
@@ -1003,43 +1044,7 @@ impl App {
             },
         });
         if let Some(team) = w.winner {
-            let length = clock(g.ended_at.unwrap_or(w.tick));
-            v["end"] = if g.spectate {
-                let mut rows = vec![json!([self.t("stat.match_length"), length])];
-                for (i, c) in w.colonies.iter().enumerate() {
-                    rows.push(json!([
-                        self.t(&format!("color.{i}")),
-                        format!(
-                            "{} {} · {} {} · {} {}",
-                            self.t("stat.trained"),
-                            c.tally.trained,
-                            self.t("stat.killed"),
-                            c.tally.killed,
-                            self.t("stat.lost"),
-                            c.tally.lost
-                        )
-                    ]));
-                }
-                json!({
-                    "title": format!("{}: {}", self.t("end.victory"), self.team_name(w, team)),
-                    "rows": rows,
-                    "button": self.button("end.main_menu", "menu.main_menu"),
-                })
-            } else {
-                let c = &w.colonies[g.me as usize];
-                let t = &c.tally;
-                json!({
-                    "title": self.t(if team == c.team { "end.victory" } else { "end.defeat" }),
-                    "rows": [
-                        [self.t("stat.match_length"), length],
-                        [self.t("stat.trained"), t.trained.to_string()],
-                        [self.t("stat.killed"), t.killed.to_string()],
-                        [self.t("stat.lost"), t.lost.to_string()],
-                        [self.t("stat.gathered"), self.cost_text(&t.gathered)],
-                    ],
-                    "button": self.button("end.main_menu", "menu.main_menu"),
-                })
-            };
+            v["end"] = self.end_view(g, team);
         } else if g.menu_open {
             v["menu"] = if g.confirm_concede {
                 json!({"heading": self.t("menu.concede_confirm"), "items": [self.button("menu.concede_yes", "menu.concede"), self.button("menu.resume", "menu.resume")]})
@@ -1051,6 +1056,155 @@ impl App {
             };
         }
         v
+    }
+
+    /// The end screen (TRIAGE row 39): the result, Match Length, a graph
+    /// of the match with one line per colony in its player color (tabs
+    /// pick what it shows), and a label-value summary for every colony.
+    /// The core lays out the graph: the page only copies the SVG path
+    /// strings, label positions and colors into the page.
+    fn end_view(&self, g: &Game, team: u8) -> Value {
+        let w = &g.world;
+        let end = g.ended_at.unwrap_or(w.tick);
+        let title = if g.spectate {
+            format!("{}: {}", self.t("end.victory"), self.team_name(w, team))
+        } else {
+            let mine = w.colonies[g.me as usize].team;
+            self.t(if team == mine {
+                "end.victory"
+            } else {
+                "end.defeat"
+            })
+        };
+        let columns: Vec<Value> = (0..w.colonies.len())
+            .map(|i| {
+                let name = self.t(&format!("color.{i}"));
+                let text = if !g.spectate && i == g.me as usize {
+                    format!("{name} · {}", self.t("seat.you"))
+                } else {
+                    name
+                };
+                json!({"text": text, "colour": render::PALETTE[i % 4]})
+            })
+            .collect();
+        let row = |label: String, f: &dyn Fn(&crate::world::Colony) -> i32| json!({"label": label, "values": w.colonies.iter().map(|c| f(c).to_string()).collect::<Vec<_>>()});
+        let mut summary = vec![
+            row(self.t("stat.trained"), &|c| c.tally.trained),
+            row(self.t("stat.killed"), &|c| c.tally.killed),
+            row(self.t("stat.lost"), &|c| c.tally.lost),
+        ];
+        for r in Resource::ALL {
+            let label = format!(
+                "{}: {}",
+                self.t("stat.gathered"),
+                self.t(&format!("resource.{}", r.key()))
+            );
+            summary.push(row(label, &|c| c.tally.gathered[r.index()]));
+        }
+        let tabs: Vec<Value> = END_GRAPHS
+            .iter()
+            .enumerate()
+            .map(|(i, key)| {
+                json!({"id": format!("end.graph.{i}"), "text": self.t(key), "active": i == g.end_graph})
+            })
+            .collect();
+        json!({
+            "title": title,
+            "rows": [[self.t("stat.match_length"), clock(end)]],
+            "tabs": tabs,
+            "graph": self.end_graph(w, g.end_graph.min(END_GRAPHS.len() - 1), end),
+            "columns": columns,
+            "summary": summary,
+            "button": self.button("end.main_menu", "menu.main_menu"),
+        })
+    }
+
+    /// One end-screen graph, laid out in SVG units: the plot inside
+    /// margins for the axis labels, a line per colony, and gridlines at 0,
+    /// half and the top of a round scale.
+    fn end_graph(&self, w: &World, graph: usize, end: i32) -> Value {
+        let (left, top) = (GRAPH_MARGIN_LEFT, GRAPH_MARGIN_TOP);
+        let plot_w = GRAPH_W - GRAPH_MARGIN_LEFT - GRAPH_MARGIN_RIGHT;
+        let plot_h = GRAPH_H - GRAPH_MARGIN_TOP - GRAPH_MARGIN_BOTTOM;
+        let span = end.max(SAMPLE_TICKS) as i64;
+        // Gathered, Killed and Lost count from nothing at the start.
+        let from_zero = !matches!(graph, 3 | 4);
+        let series: Vec<Vec<(i32, i32)>> = w
+            .colonies
+            .iter()
+            .map(|c| {
+                let mut pts: Vec<(i32, i32)> = Vec::new();
+                if from_zero {
+                    pts.push((0, 0));
+                }
+                pts.extend(
+                    c.history
+                        .iter()
+                        .filter(|s| s.tick <= end)
+                        .map(|s| (s.tick, sample_value(s, graph))),
+                );
+                pts
+            })
+            .collect();
+        let most = series.iter().flatten().map(|p| p.1).max().unwrap_or(0);
+        let scale = nice_ceiling(most) as i64;
+        let x = |t: i32| left + (t as i64 * plot_w as i64 / span) as i32;
+        let y = |v: i32| top + plot_h - (v as i64 * plot_h as i64 / scale) as i32;
+        let lines: Vec<Value> = series
+            .iter()
+            .enumerate()
+            .filter(|(_, pts)| !pts.is_empty())
+            .map(|(i, pts)| {
+                let d: Vec<String> = pts
+                    .iter()
+                    .enumerate()
+                    .map(|(k, (t, v))| {
+                        format!("{} {} {}", if k == 0 { "M" } else { "L" }, x(*t), y(*v))
+                    })
+                    .collect();
+                json!({"key": format!("colony.{i}"), "d": d.join(" "), "colour": render::PALETTE[i % 4]})
+            })
+            .collect();
+        let right = left + plot_w;
+        // A gridline at half the scale only when it is a whole round
+        // number (250 of 500, 10 of 20), never 2 of 5.
+        let mut marks = vec![0, scale];
+        if scale % 2 == 0 {
+            marks.insert(1, scale / 2);
+        }
+        let grid: Vec<String> = marks
+            .iter()
+            .map(|v| format!("M {left} {} H {right}", y(*v as i32)))
+            .collect();
+        let axis_y = top + plot_h;
+        let mut labels: Vec<Value> = marks
+            .iter()
+            .map(|v| {
+                json!({"x": left - 6, "y": y(*v as i32) + 4, "anchor": "end", "text": v.to_string()})
+            })
+            .collect();
+        for (t, anchor) in [(0, "start"), (end / 2, "middle"), (end, "end")] {
+            labels.push(json!({"x": x(t), "y": axis_y + 18, "anchor": anchor, "text": clock(t)}));
+        }
+        let title = match graph {
+            0..=2 => format!("{}: {}", self.t("stat.gathered"), self.t(END_GRAPHS[graph])),
+            3 => format!(
+                "{}: {}",
+                self.t("stat.combat_ants"),
+                self.t("stat.pop_cost")
+            ),
+            _ => self.t(END_GRAPHS[graph]),
+        };
+        json!({
+            "title": title,
+            "width": GRAPH_W.to_string(),
+            "height": GRAPH_H.to_string(),
+            "view_box": format!("0 0 {GRAPH_W} {GRAPH_H}"),
+            "grid": grid.join(" "),
+            "axis": format!("M {left} {top} V {axis_y} H {right}"),
+            "lines": lines,
+            "labels": labels,
+        })
     }
 
     /// The top bar for one colony: resources with Income, Population, Tier.
@@ -1071,10 +1225,18 @@ impl App {
             .collect();
         let pop = w.population(me);
         let housing = w.housing(me);
+        // Combat Ants (TRIAGE row 48): every ant out now that is not a
+        // Gatherer or Builder, and their Pop Cost; the queue is not counted.
+        let (combat, combat_pop) = w
+            .ants
+            .iter()
+            .filter(|a| a.colony == me && a.species.is_combat())
+            .fold((0, 0), |(n, p), a| (n + 1, p + a.species.stats().pop));
         json!({
             "resources": resources,
             "stats": [
                 {"key": "population", "label": self.t("stat.population"), "value": format!("{pop} / {housing}"), "term": self.t("stat.population")},
+                {"key": "combat_ants", "label": self.t("stat.combat_ants"), "value": format!("{combat} · {} {combat_pop}", self.t("stat.pop_cost")), "term": self.t("stat.combat_ants")},
                 {"key": "tier", "label": self.t("stat.tier"), "value": c.tier.to_string(), "term": self.t("stat.tier")},
             ],
             "colour": self.t(&format!("color.{me}")),
@@ -1142,15 +1304,50 @@ impl App {
             }
             for (key, slots) in groups {
                 let front = items[slots[0]];
-                let (label, icon) = match front.work {
-                    Work::Train(sp) => (self.species_name(sp), format!("species.{}", sp.key())),
-                    Work::Research(u, r) => (
-                        format!("{} {}", self.upgrade_name(u), roman(r)),
-                        format!("upgrade.{}", u.key()),
+                // Upgrades are told apart (TRIAGE row 53): the rank on the
+                // picture, the stat they raise beside it, and a kind that
+                // the page styles differently for a Colony Upgrade and a
+                // Species Upgrade. An evolution shows the tier it reaches.
+                let mut extra: Vec<Value> = Vec::new();
+                let (label, icon, kind, rank, short) = match front.work {
+                    Work::Train(sp) => (
+                        self.species_name(sp),
+                        format!("species.{}", sp.key()),
+                        "train",
+                        String::new(),
+                        String::new(),
                     ),
+                    Work::Research(u, r) => {
+                        let (stat, _) = upgrade_change(u);
+                        let species = matches!(u, Upgrade::Species(_));
+                        extra.push(json!([self.t("stat.rank"), roman(r)]));
+                        extra.push(json!([
+                            self.t("stat.upgrade"),
+                            self.t(if species {
+                                "stat.species_upgrade"
+                            } else {
+                                "stat.colony_upgrade"
+                            })
+                        ]));
+                        extra.push(json!([self.t("stat.effect"), self.upgrade_effect(u)]));
+                        (
+                            format!("{} {}", self.upgrade_name(u), roman(r)),
+                            format!("upgrade.{}", u.key()),
+                            if species {
+                                "species_upgrade"
+                            } else {
+                                "colony_upgrade"
+                            },
+                            roman(r).to_string(),
+                            self.t(stat),
+                        )
+                    }
                     Work::Evolve(t) => (
                         format!("{} {} {t}", self.t("action.evolve"), self.t("stat.tier")),
                         "action.evolve".into(),
+                        "evolve",
+                        format!("{}{t}", self.t("short.tier")),
+                        String::new(),
                     ),
                 };
                 let n = slots.len();
@@ -1170,18 +1367,24 @@ impl App {
                     .sum();
                 let pct = front.progress * 100 / front.total.max(1);
                 let last = slots[n - 1];
+                let mut rows = extra;
+                rows.push(json!([self.t("stat.duration"), self.seconds(left)]));
+                rows.push(json!([self.t("stat.cost"), self.cost_text(&front.cost)]));
+                rows.push(json!([
+                    self.t("stat.hotkey"),
+                    format!("{}: {}", self.t("hud.click"), self.t("action.cancel"))
+                ]));
                 queue.push(json!({
                     "key": format!("{}.{key}", s.id),
                     "id": format!("cancel.{}.{last}", s.id),
                     "label": title,
                     "icon": icon,
+                    "kind": kind,
+                    "rank": rank,
+                    "short": short,
                     "count": count,
                     "progress": format!("{pct}%"),
-                    "rows": [
-                        [self.t("stat.duration"), self.seconds(left)],
-                        [self.t("stat.cost"), self.cost_text(&front.cost)],
-                        [self.t("stat.hotkey"), format!("{}: {}", self.t("hud.click"), self.t("action.cancel"))],
-                    ],
+                    "rows": rows,
                 }));
             }
         }
@@ -1412,10 +1615,15 @@ impl App {
                         format!("{count} / {}", crate::rules::WAYPOINTS_PER_SPECIES),
                     ));
                 }
+                // All Ants also has its own hotkey, Tab, from any grid tab.
+                let keys = match sp {
+                    None => format!("{key} · {}", key_label(&self.player.key_of("all_ants"))),
+                    Some(_) => key.to_string(),
+                };
                 rows.push(row(
                     "stat.hotkey",
                     format!(
-                        "{key} · {}: {} · Shift {}: {}",
+                        "{keys} · {}: {} · Shift {}: {}",
                         self.t("hud.click"),
                         self.t("action.set_waypoint"),
                         self.t("hud.click"),
@@ -1586,25 +1794,7 @@ impl App {
     }
 
     fn upgrade_effect(&self, u: Upgrade) -> String {
-        let (stat, by) = match u {
-            Upgrade::Damage => ("stat.damage", "+1"),
-            Upgrade::Armor => ("stat.armor", "+1"),
-            Upgrade::Health => ("stat.health", "+10%"),
-            Upgrade::GatherRate => ("stat.gather_rate", "+20%"),
-            Upgrade::CarryCapacity => ("stat.carry_capacity", "+3"),
-            Upgrade::BuildRate => ("stat.build_rate", "+50%"),
-            Upgrade::Species(s) => match s {
-                Species::Soldier => ("stat.health", "+15"),
-                Species::Fire => ("stat.move_speed", "+15%"),
-                Species::Turtle => ("stat.armor", "+2"),
-                Species::Acid => ("stat.range", "+1"),
-                Species::Nurse => ("stat.heal_rate", "+1"),
-                Species::Flying => ("stat.damage", "+2"),
-                Species::Exploding => ("stat.splash", "+0.5"),
-                Species::TrapJaw => ("stat.damage", "+5"),
-                _ => ("stat.damage", "+4"),
-            },
-        };
+        let (stat, by) = upgrade_change(u);
         format!("{} {by}", self.t(stat))
     }
 
@@ -1761,6 +1951,15 @@ impl App {
                 self.player.edge_pan = value == "on";
                 self.save_settings();
             }
+            "player.edge_pan_speed" => {
+                if let Some(i) = crate::keys::EDGE_PAN_SPEEDS
+                    .iter()
+                    .position(|(k, _)| *k == value)
+                {
+                    self.player.edge_pan_speed = i;
+                    self.save_settings();
+                }
+            }
             _ => self.act_prefixed(id, value, ctrl, shift),
         }
     }
@@ -1775,6 +1974,10 @@ impl App {
         } else if let Some(n) = id.strip_prefix("tab.") {
             if let (Ok(i), Some(g)) = (n.parse::<usize>(), &mut self.game) {
                 g.tab = i.min(TABS.len() - 1);
+            }
+        } else if let Some(n) = id.strip_prefix("end.graph.") {
+            if let (Ok(i), Some(g)) = (n.parse::<usize>(), &mut self.game) {
+                g.end_graph = i.min(END_GRAPHS.len() - 1);
             }
         } else if let Some(rest) = id.strip_prefix("cancel.") {
             let mut it = rest.split('.');
@@ -1939,6 +2142,11 @@ impl App {
             }
         } else if slot == "pause" {
             self.act("time.pause", "", false, false);
+        } else if slot == "all_ants" {
+            // From any grid tab, exactly like the Waypoints tab's All Ants.
+            if let Some(g) = self.game.as_mut().filter(|g| !g.spectate) {
+                g.mode = Mode::Waypoint(None);
+            }
         } else if slot == "home" {
             if let Some(g) = &mut self.game {
                 let here = Pos::new(g.view.centre_x, g.view.centre_y);
@@ -2095,20 +2303,26 @@ impl App {
         let Some(g) = &mut self.game else {
             return;
         };
-        // Camera: arrow keys and screen edges.
-        let pan = g.pan_speed * dt as i32 / 1000;
+        // Camera: arrow keys, and screen edges at the Edge Pan Speed. On an
+        // axis with an arrow key held, the key's speed wins.
+        let key_pan = g.pan_speed * dt as i32 / 1000;
+        let edge_pan = self.player.edge_pan_px() * dt as i32 / 1000;
         let edge = 4;
         let (mx, my) = g.mouse;
         let e = self.player.edge_pan && g.drag.is_none() && g.mouse != (0, 0);
-        let left = g.pan_keys[0] || (e && mx <= edge);
-        let right = g.pan_keys[1] || (e && mx >= g.view.view_w - edge);
-        let up = g.pan_keys[2] || (e && my <= edge);
-        let down = g.pan_keys[3] || (e && my >= g.view.view_h - edge);
+        let keys_x = g.pan_keys[0] as i32 - g.pan_keys[1] as i32;
+        let keys_y = g.pan_keys[2] as i32 - g.pan_keys[3] as i32;
+        let edge_x = (e && mx <= edge) as i32 - (e && mx >= g.view.view_w - edge) as i32;
+        let edge_y = (e && my <= edge) as i32 - (e && my >= g.view.view_h - edge) as i32;
+        let axis = |keys: i32, edges: i32| {
+            if keys != 0 {
+                key_pan * keys
+            } else {
+                edge_pan * edges
+            }
+        };
         // pan() moves the map with the pointer, so the view goes the other way.
-        g.view.pan(
-            pan * (left as i32 - right as i32),
-            pan * (up as i32 - down as i32),
-        );
+        g.view.pan(axis(keys_x, edge_x), axis(keys_y, edge_y));
         g.view.clamp(g.world.map.w, g.world.map.h);
 
         if g.world.winner.is_some() {
@@ -2563,6 +2777,77 @@ fn place_cost(
 
 /// Icons are drawn at this many pixels square.
 pub const ICON_PX: i32 = 48;
+
+/// The end screen's graph tabs, as string keys, in order (TRIAGE row 39):
+/// Food, Nectar and Leaves gathered; Combat Ants (their Pop Cost);
+/// Population; Killed; Lost.
+pub const END_GRAPHS: [&str; 7] = [
+    "resource.food",
+    "resource.nectar",
+    "resource.leaves",
+    "stat.combat_ants",
+    "stat.population",
+    "stat.killed",
+    "stat.lost",
+];
+
+/// End-screen graph size in SVG units (pixels at 1:1), and the margins
+/// around the plot that hold the axis labels.
+pub const GRAPH_W: i32 = 600;
+pub const GRAPH_H: i32 = 260;
+const GRAPH_MARGIN_LEFT: i32 = 52;
+const GRAPH_MARGIN_RIGHT: i32 = 14;
+const GRAPH_MARGIN_TOP: i32 = 10;
+const GRAPH_MARGIN_BOTTOM: i32 = 26;
+
+/// What graph `graph` plots from one Sample.
+fn sample_value(s: &Sample, graph: usize) -> i32 {
+    match graph {
+        0..=2 => s.gathered[graph],
+        3 => s.army,
+        4 => s.population,
+        5 => s.killed,
+        _ => s.lost,
+    }
+}
+
+/// The top of a graph's scale: the smallest of 1, 2 or 5 times a power of
+/// ten that is at least `v` (and at least 1).
+fn nice_ceiling(v: i32) -> i32 {
+    let v = v.max(1) as i64;
+    let mut p: i64 = 1;
+    loop {
+        for m in [1, 2, 5] {
+            if p * m >= v {
+                return (p * m) as i32;
+            }
+        }
+        p *= 10;
+    }
+}
+
+/// The stat an upgrade raises (a string key) and by how much.
+fn upgrade_change(u: Upgrade) -> (&'static str, &'static str) {
+    match u {
+        Upgrade::Damage => ("stat.damage", "+1"),
+        Upgrade::Armor => ("stat.armor", "+1"),
+        Upgrade::Health => ("stat.health", "+10%"),
+        Upgrade::GatherRate => ("stat.gather_rate", "+20%"),
+        Upgrade::CarryCapacity => ("stat.carry_capacity", "+3"),
+        Upgrade::BuildRate => ("stat.build_rate", "+50%"),
+        Upgrade::Species(s) => match s {
+            Species::Soldier => ("stat.health", "+15"),
+            Species::Fire => ("stat.move_speed", "+15%"),
+            Species::Turtle => ("stat.armor", "+2"),
+            Species::Acid => ("stat.range", "+1"),
+            Species::Nurse => ("stat.heal_rate", "+1"),
+            Species::Flying => ("stat.damage", "+2"),
+            Species::Exploding => ("stat.splash", "+0.5"),
+            Species::TrapJaw => ("stat.damage", "+5"),
+            _ => ("stat.damage", "+4"),
+        },
+    }
+}
 
 /// The icon key of a grid button.
 fn button_icon(b: Button) -> String {

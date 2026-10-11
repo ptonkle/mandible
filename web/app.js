@@ -228,8 +228,11 @@ function drawBar(m) {
     }
   });
   sync(el("queue"), m.queue, (q) => q.key, newQueueItem, (item, q) => {
-    const [img, count, fill] = item.children;
+    const [img, rank, short, count, fill] = item.children;
+    setClass(item, "qitem " + q.kind);
     setIcon(img, q.icon);
+    setText(rank, q.rank);
+    setText(short, q.short);
     setText(count, q.count);
     fill.style.width = q.progress;
     if (tipAnchor === item) showTip(q.label, q.rows, item);
@@ -249,7 +252,7 @@ function drawBar(m) {
 function newQueueItem() {
   const item = make("button", "qitem");
   item.type = "button";
-  item.append(iconImage(""), make("span", "count"), make("span", "fill"));
+  item.append(iconImage(""), make("span", "rank"), make("span", "short"), make("span", "count"), make("span", "fill"));
   item.addEventListener("click", () => send(item.item.id, ""));
   item.addEventListener("mouseenter", () => showTip(item.item.label, item.item.rows, item));
   item.addEventListener("mouseleave", hideTip);
@@ -328,9 +331,74 @@ function drawOverlay(m) {
   if (box.title) panel.append(make("h2", "", box.title));
   if (box.heading) panel.append(make("h2", "", box.heading));
   if (box.rows) panel.append(pairs(box.rows));
+  if (box.graph) {
+    panel.classList.add("end");
+    panel.append(endBody(box));
+  }
   const buttons = box.items || [box.button];
   buttons.forEach((b) => panel.append(element(b)));
   overlay.append(panel);
+}
+
+// ---- the end screen: graph tabs, the core's graph, every colony's summary ----
+
+// SVG nodes are made in the namespace of index.html's graph template, so
+// the page names no URL.
+function svgNode(tag, attrs) {
+  const ns = el("graph-template").content.firstElementChild.namespaceURI;
+  const node = document.createElementNS(ns, tag);
+  Object.keys(attrs).forEach((k) => node.setAttribute(k, attrs[k]));
+  return node;
+}
+
+function endBody(box) {
+  const body = make("div", "end-body");
+  const left = make("div", "end-graph");
+  const tabs = make("div", "end-tabs");
+  box.tabs.forEach((t) => {
+    const b = make("button", "tab" + (t.active ? " active" : ""), t.text);
+    b.type = "button";
+    b.id = t.id;
+    if (hints[t.text]) b.dataset.term = t.text;
+    b.addEventListener("click", () => send(t.id, ""));
+    tabs.append(b);
+  });
+  const g = box.graph;
+  const svg = svgNode("svg", { viewBox: g.view_box, width: g.width, height: g.height, class: "graph" });
+  svg.append(svgNode("path", { d: g.grid, class: "graph-grid" }));
+  svg.append(svgNode("path", { d: g.axis, class: "graph-axis" }));
+  g.lines.forEach((l) => svg.append(svgNode("path", { d: l.d, stroke: l.colour, class: "graph-line" })));
+  g.labels.forEach((l) => {
+    const t = svgNode("text", { x: l.x, y: l.y, "text-anchor": l.anchor, class: "graph-label" });
+    t.textContent = l.text;
+    svg.append(t);
+  });
+  left.append(tabs, make("h3", "", g.title), svg);
+  body.append(left, summaryTable(box));
+  return body;
+}
+
+function summaryTable(box) {
+  const table = make("table", "pairs summary");
+  const head = make("tr");
+  head.append(make("td"));
+  box.columns.forEach((c) => {
+    const th = make("th");
+    const swatch = make("span", "swatch");
+    swatch.style.background = c.colour;
+    th.append(swatch, make("span", "", c.text));
+    head.append(th);
+  });
+  table.append(head);
+  box.summary.forEach((r) => {
+    const tr = make("tr");
+    const label = make("td", "", r.label);
+    if (hints[r.label]) label.dataset.term = r.label;
+    tr.append(label);
+    r.values.forEach((v) => tr.append(make("td", "", v)));
+    table.append(tr);
+  });
+  return table;
 }
 
 // ---- tooltips and term hints ----
@@ -399,7 +467,12 @@ function bindInput() {
   ["keydown", "keyup"].forEach((type) => {
     window.addEventListener(type, (e) => {
       if (typing(e)) return;
-      if (ui && ui.screen === "match" && !e.ctrlKey) e.preventDefault();
+      // In a match, and while Keybinds waits for a key, keys such as Tab
+      // (All Ants), Space and Enter never move focus or press a button.
+      if (ui && (ui.screen === "match" || ui.keys_captured) && !e.ctrlKey) e.preventDefault();
+      // Space presses a focused button when it comes back up: the key just
+      // bound must not press its Keybinds button again.
+      if (ui && ui.keys_captured && document.activeElement) document.activeElement.blur();
       if (e.altKey) e.preventDefault();
       if (e.repeat) return;
       game.key(e.code, type === "keydown", e.ctrlKey || e.altKey || e.metaKey, e.shiftKey);

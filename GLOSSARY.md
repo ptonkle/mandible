@@ -276,6 +276,8 @@ Rejected names. Do not reuse them without passing the naming test.
 | Tooltip | ◆ | The hover box for a button: label–value pairs only (name, role, tier, cost, stats, requirements). No sentences. | hint, info popup |
 | Term Hint | ★ | The short definition shown when hovering a glossary term on screen. One sentence. | tooltip (that is for buttons), definition popup, help text |
 | Announcement | ◆ | A short label on screen, such as "Event: Windfall". No sentences. | alert, notification, popup |
+| Combat Ants | ◆ | Every ant a colony has out now that is not a Gatherer or Builder (queens and the queue are not counted). Shown in the top bar as a count and their Pop Cost, "Combat Ants 12 · Pop Cost 30" (TRIAGE row 48), and as an end-screen graph of their Pop Cost (row 39). | troops, military, fighters |
+| Edge Pan Speed | ◆ | The Player Setting for how fast Edge Pan moves the view: Very Slow, Slow, Normal, Fast or Very Fast (TRIAGE row 56). The arrow keys keep their own pace. | scroll speed, pan rate |
 
 ## 10. Vision
 

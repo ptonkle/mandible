@@ -31,7 +31,19 @@ pub const SLOTS: [&str; 22] = [
     "pan.up",
 ];
 
-pub const EXTRA_SLOTS: [&str; 2] = ["pan.down", "pause"];
+/// Slots added after the first release, listed after the others.
+/// `all_ants` (TRIAGE row 55): the All Ants waypoint from any grid tab.
+pub const EXTRA_SLOTS: [&str; 3] = ["pan.down", "pause", "all_ants"];
+
+/// Edge Pan Speed (TRIAGE row 56): the word key shown in Player Settings,
+/// and the pixels per second Edge Pan moves the view at each.
+pub const EDGE_PAN_SPEEDS: [(&str, i32); 5] = [
+    ("very_slow", 300),
+    ("slow", 600),
+    ("normal", 900),
+    ("fast", 1350),
+    ("very_fast", 1800),
+];
 
 fn default_key(slot: &str) -> &'static str {
     match slot {
@@ -59,6 +71,7 @@ fn default_key(slot: &str) -> &'static str {
         "pan.up" => "ArrowUp",
         "pan.down" => "ArrowDown",
         "pause" => "KeyP",
+        "all_ants" => "Tab",
         _ => "",
     }
 }
@@ -73,6 +86,9 @@ pub struct PlayerSettings {
     /// (slot, key code) pairs; slots missing here use their default.
     pub keys: Vec<(String, String)>,
     pub edge_pan: bool,
+    /// An index into `EDGE_PAN_SPEEDS`; settings saved before it was added
+    /// read as Normal.
+    pub edge_pan_speed: usize,
 }
 
 impl Default for PlayerSettings {
@@ -80,6 +96,7 @@ impl Default for PlayerSettings {
         PlayerSettings {
             keys: Vec::new(),
             edge_pan: true,
+            edge_pan_speed: 2,
         }
     }
 }
@@ -92,7 +109,15 @@ impl PlayerSettings {
                 return Err(format!("Keybinds: unknown slot {slot}"));
             }
         }
+        if p.edge_pan_speed >= EDGE_PAN_SPEEDS.len() {
+            return Err("Edge Pan Speed: out of range".into());
+        }
         Ok(p)
+    }
+
+    /// Pixels per second Edge Pan moves the view.
+    pub fn edge_pan_px(&self) -> i32 {
+        EDGE_PAN_SPEEDS[self.edge_pan_speed.min(EDGE_PAN_SPEEDS.len() - 1)].1
     }
 
     pub fn key_of(&self, slot: &str) -> String {
@@ -131,6 +156,12 @@ impl PlayerSettings {
     pub fn reset(&mut self) {
         self.keys.clear();
     }
+}
+
+/// The label of a slot's default key: grid slots are named by it in
+/// Keybinds ("Action Button Q"), wherever they are bound now.
+pub fn default_label(slot: &str) -> String {
+    key_label(default_key(slot))
 }
 
 /// The letter shown on a button for a key code: "KeyQ" → "Q", "Digit1" → "1".
@@ -186,6 +217,17 @@ mod tests {
     #[test]
     fn unknown_slots_are_rejected() {
         assert!(PlayerSettings::parse(r#"{"keys": [["grid.99", "KeyQ"]]}"#).is_err());
+        assert!(PlayerSettings::parse(r#"{"edge_pan_speed": 9}"#).is_err());
+    }
+
+    #[test]
+    fn tab_sets_the_all_ants_waypoint_and_old_settings_still_read() {
+        let p = PlayerSettings::default();
+        assert_eq!(p.slot_of("Tab"), Some("all_ants"));
+        assert_eq!(key_label("Tab"), "Tab");
+        // Saved before Edge Pan Speed existed: Normal, 900 pixels a second.
+        let old = PlayerSettings::parse(r#"{"keys": [], "edge_pan": false}"#).unwrap();
+        assert_eq!(old.edge_pan_px(), 900);
     }
 
     #[test]

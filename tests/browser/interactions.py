@@ -95,6 +95,21 @@ def run(page, check, engine):
     check(food == "300", f"a match starts with 300 Food (Normal) [{food}]")
     pop = page.locator("#resources .res .value").nth(3).inner_text()
     check(pop == "10 / 20", f"Population starts at 10 / 20 [{pop}]")
+    # Combat Ants (row 48): the 2 starting Soldier Ants, Pop Cost 1 each.
+    combat = text(page, "#resources .res.combat_ants .value")
+    check(combat == "2 · " + STRINGS["stat.pop_cost"] + " 2", f"the top bar shows Combat Ants 2 · Pop Cost 2 [{combat}]")
+
+    # Tab (row 55): the All Ants waypoint from the Ants tab; focus stays.
+    page.keyboard.press("Digit1")
+    page.keyboard.press("Tab")
+    page.wait_for_timeout(200)
+    focus = page.evaluate("() => document.activeElement === document.body")
+    page.keyboard.press("Digit3")
+    page.wait_for_timeout(200)
+    active = page.evaluate("() => document.querySelector('.gbtn').classList.contains('active')")
+    check(focus and active, f"Tab sets the All Ants waypoint from the Ants tab without moving focus [{focus} {active}]")
+    page.keyboard.press("Escape")
+    page.keyboard.press("Digit1")
 
     # Train one Harvester Ant with its hotkey, Q on the Ants tab.
     page.keyboard.press("Digit1")
@@ -165,6 +180,16 @@ def run(page, check, engine):
     page.locator("#overlay h2", has_text=STRINGS["end.defeat"]).wait_for(timeout=5000)
     title = text(page, "#overlay h2")
     check(title == STRINGS["end.defeat"], f"conceding shows {STRINGS['end.defeat']} [{title}]")
+    # The end screen (row 39): graph tabs, one line per colony (1v1: two),
+    # every colony's summary, all inside 1280 x 720.
+    lines = page.locator("#overlay svg.graph path.graph-line").count()
+    cols = page.locator("#overlay table.summary th").count()
+    check(lines == 2 and cols == 2, f"the end screen graphs and summarises both colonies [{lines} {cols}]")
+    page.click("#end\\.graph\\.4")
+    page.locator("#overlay h3", has_text=STRINGS["stat.population"]).wait_for(timeout=5000)
+    check(True, "an end-screen graph tab switches the graph")
+    box = page.evaluate("() => { const r = document.querySelector('#overlay .panel').getBoundingClientRect(); return [r.left, r.top, r.right, r.bottom, innerWidth, innerHeight]; }")
+    check(box[0] >= 0 and box[1] >= 0 and box[2] <= box[4] and box[3] <= box[5], f"the end screen fits {FIT_W}x{FIT_H} with no scroll bar {box}")
     page.click("#end\\.main_menu")
     page.wait_for_selector(".leaf", timeout=5000)
     check(True, "Main Menu returns after the match")
@@ -193,6 +218,14 @@ def run(page, check, engine):
     # its panel reports the budget (PLAN decision 25).
     page.click("#go\\.player_settings")
     page.wait_for_selector("#go\\.benchmark", timeout=5000)
+    # Keybinds (row 57) names the tabs as in the match, lists the All Ants
+    # hotkey (Tab), and offers Edge Pan Speed (row 56).
+    labels = [t.strip() for t in page.locator(".keybind span").all_inner_texts()]
+    want = STRINGS["keys.tab"] + ": " + STRINGS["tab.ants"]
+    check(want in labels and not any(l.startswith(STRINGS["keys.tab"] + " 1") for l in labels), f"Keybinds shows {want} {labels[12:18]}")
+    all_ants = page.inner_text("#bind\\.all_ants").strip()
+    check(all_ants == "Tab", f"the All Ants hotkey is Tab by default [{all_ants}]")
+    check(page.locator("#player\\.edge_pan_speed option").count() == 5, "Edge Pan Speed offers five speeds")
     page.click("#go\\.benchmark")
     page.wait_for_selector("#panel dd", timeout=20000)
     page.wait_for_timeout(3000)

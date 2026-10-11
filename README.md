@@ -31,10 +31,12 @@ Every game word is defined in [`GLOSSARY.md`](GLOSSARY.md). The design is in [`B
 | Place a blueprint | Button, then left-click the map. Shift + click keeps placing. |
 | Set a waypoint (replaces that species' waypoints) | Button, then left-click the map |
 | Add a waypoint (up to 4 per species) | Button, then Shift + click; stays in waypoint mode |
+| All Ants waypoint, from any grid tab | `Tab`, then left-click the map (Shift + click adds) |
 | Wall | Button, then press, drag and release |
 | Clear a waypoint; cancel a blueprint | Right-click it |
-| Cancel a queued item | Click it in the queue bar: one at a time, refunded. Ants of one species show once per queen or hatchery, with a ×N count |
-| Pan the view | Drag, arrow keys, screen edges (all four, even under the top bar), or the minimap |
+| Cancel a queued item | Click it in the queue bar: one at a time, refunded. Ants of one species show once per queen or hatchery, with a ×N count. An upgrade shows its rank (I, II, III) on its picture; a Colony Upgrade has a gold double border, a Species Upgrade a green one |
+| Pan the view | Drag, arrow keys, screen edges (all four, even under the top bar), or the minimap. **Edge Pan Speed** (Player Settings): Very Slow to Very Fast |
+| After the match | Graph tabs: Food, Nectar, Leaves gathered, Combat Ants, Population, Killed, Lost; one line per colony, and every colony's summary |
 | Zoom | Mouse wheel |
 | Home Nest | `Space` |
 | Menu (Resume, Concede); cancel placement | `Esc` |

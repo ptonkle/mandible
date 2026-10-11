@@ -40,6 +40,10 @@
   <div id="tooltip" class="tooltip" hidden></div>
   <div id="hint" class="hint" hidden></div>
 
+  <!-- The end screen's graph is SVG; app.js makes its nodes in this
+       template's namespace. -->
+  <template id="graph-template"><svg class="graph" aria-hidden="true"></svg></template>
+
   <template id="leaf-template">
     <button class="leaf" type="button">
       <!-- Four kinds of leaf; CSS shows one per main-menu button, in order:
