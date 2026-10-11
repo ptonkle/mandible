@@ -1391,7 +1391,7 @@ impl App {
         let seed = self.seed_text.parse::<u64>().unwrap_or(self.entropy);
         let mut settings = self.setup.clone();
         if settings.biome == Biome::Random {
-            settings.biome = if seed % 2 == 0 {
+            settings.biome = if seed.is_multiple_of(2) {
                 Biome::Picnic
             } else {
                 Biome::FlowerField
@@ -1852,7 +1852,7 @@ impl App {
         self.online.outbox.extend(out);
         let mut settings = settings;
         if settings.biome == Biome::Random {
-            settings.biome = if start.seed % 2 == 0 {
+            settings.biome = if start.seed.is_multiple_of(2) {
                 Biome::Picnic
             } else {
                 Biome::FlowerField
