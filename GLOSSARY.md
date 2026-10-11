@@ -52,7 +52,7 @@ How to read the tables:
 | Larva | ★ | The weakest difficulty. Term hint: "Larva: the least capable AI." | Easy, Beginner |
 | Pupa | ★ | The middle difficulty. Term hint: "Pupa: a moderately capable AI." | Moderate, Medium, Normal |
 | Imago | ★ | The strongest difficulty; the word means a fully grown adult insect. Wherever difficulties are listed, they appear in order Larva → Pupa → Imago, so the order is visible. Term hint: "Imago: the most capable AI." | Hard, Expert, Insane |
-| Colony | ◆ | Everything one player owns: ants, queens, walls, blueprints, stockpile, upgrades. | faction, civ, army, empire |
+| Colony | ◆ | Everything one player owns: ants, queens, walls, blueprints, stockpile, upgrades. | faction, civ, empire |
 | Team | ◆ | The colonies that win or lose together. In 1v1 and free-for-all, each colony is its own team. | side, alliance |
 | Ally | ◆ | Another colony on your team. | friend, teammate (in UI text) |
 | Enemy | ◆ | Any colony not on your team. | opponent (in UI text), foe |
@@ -236,7 +236,7 @@ Rejected names. Do not reuse them without passing the naming test.
 | --- | --- | --- | --- |
 | Action | ★ | Anything the player can do from the action grid: train, place, upgrade, evolve, retreat. | ability, command, order, spell |
 | Waypoint | ★ | A map point where every ant of one species goes. A species can have several. | rally point, flag, marker, target, move order |
-| All Ants, ALL | ★ | The Waypoints-tab button that sets one waypoint for every combat species at once, replacing theirs. The button shows its short form, "ALL", in place of a picture. | everyone, all units, army |
+| All Ants, ALL | ★ | The Waypoints-tab button that sets one waypoint for every combat species at once, replacing theirs. The button shows its short form, "ALL", in place of a picture. | everyone, all units |
 | Set Waypoint | ★ | Place a waypoint for a species with a plain click, replacing its waypoints. | order, command, send |
 | Add Waypoint | ◆ | Shift + click with a Waypoints button: place one more waypoint for the species (up to 4), keeping its others, and stay in waypoint mode. | append, queue waypoint |
 | Clear Waypoint | ★ | Remove one waypoint (right-click it). | delete, cancel, remove |
@@ -276,7 +276,7 @@ Rejected names. Do not reuse them without passing the naming test.
 | Tooltip | ◆ | The hover box for a button: label–value pairs only (name, role, tier, cost, stats, requirements). No sentences. | hint, info popup |
 | Term Hint | ★ | The short definition shown when hovering a glossary term on screen. One sentence. | tooltip (that is for buttons), definition popup, help text |
 | Announcement | ◆ | A short label on screen, such as "Event: Windfall". No sentences. | alert, notification, popup |
-| Combat Ants | ◆ | Every ant a colony has out now that is not a Gatherer or Builder (queens and the queue are not counted). Shown in the top bar as a count and their Pop Cost, "Combat Ants 12 · Pop Cost 30" (TRIAGE row 48), and as an end-screen graph of their Pop Cost (row 39). | troops, military, fighters |
+| Army | ★ | Every ant a colony has out now that is not a Gatherer or Builder (queens and the queue are not counted). Shown in the top bar as a count and their Pop Cost, "Army 12 · Pop Cost 30" (TRIAGE row 48), and as an end-screen graph of their Pop Cost (row 39). Allowed by the person, 2026-10-11 (it had been a never-say word). | combat ants, troops, military, fighters |
 | Edge Pan Speed | ◆ | The Player Setting for how fast Edge Pan moves the view: Very Slow, Slow, Normal, Fast or Very Fast (TRIAGE row 56). The arrow keys keep their own pace. | scroll speed, pan rate |
 
 ## 10. Vision

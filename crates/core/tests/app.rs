@@ -746,7 +746,7 @@ fn the_end_screen_graphs_every_colony_and_summarises_each() {
             "Food",
             "Nectar",
             "Leaves",
-            "Combat Ants",
+            "Army",
             "Population",
             "Killed",
             "Lost"
@@ -833,6 +833,6 @@ fn the_end_screen_graphs_every_colony_and_summarises_each() {
     a.act("end.graph.3", "", false, false);
     assert_eq!(
         a.ui()["match"]["end"]["graph"]["title"],
-        "Combat Ants: Pop Cost"
+        "Army: Pop Cost"
     );
 }

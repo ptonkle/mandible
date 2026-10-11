@@ -1225,7 +1225,7 @@ impl App {
             .collect();
         let pop = w.population(me);
         let housing = w.housing(me);
-        // Combat Ants (TRIAGE row 48): every ant out now that is not a
+        // Army (TRIAGE row 48): every ant out now that is not a
         // Gatherer or Builder, and their Pop Cost; the queue is not counted.
         let (combat, combat_pop) = w
             .ants
@@ -2779,7 +2779,7 @@ fn place_cost(
 pub const ICON_PX: i32 = 48;
 
 /// The end screen's graph tabs, as string keys, in order (TRIAGE row 39):
-/// Food, Nectar and Leaves gathered; Combat Ants (their Pop Cost);
+/// Food, Nectar and Leaves gathered; Army (its Pop Cost);
 /// Population; Killed; Lost.
 pub const END_GRAPHS: [&str; 7] = [
     "resource.food",

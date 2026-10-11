@@ -95,9 +95,9 @@ def run(page, check, engine):
     check(food == "300", f"a match starts with 300 Food (Normal) [{food}]")
     pop = page.locator("#resources .res .value").nth(3).inner_text()
     check(pop == "10 / 20", f"Population starts at 10 / 20 [{pop}]")
-    # Combat Ants (row 48): the 2 starting Soldier Ants, Pop Cost 1 each.
+    # Army (row 48): the 2 starting Soldier Ants, Pop Cost 1 each.
     combat = text(page, "#resources .res.combat_ants .value")
-    check(combat == "2 · " + STRINGS["stat.pop_cost"] + " 2", f"the top bar shows Combat Ants 2 · Pop Cost 2 [{combat}]")
+    check(combat == "2 · " + STRINGS["stat.pop_cost"] + " 2", f"the top bar shows Army 2 · Pop Cost 2 [{combat}]")
 
     # Tab (row 55): the All Ants waypoint from the Ants tab; focus stays.
     page.keyboard.press("Digit1")

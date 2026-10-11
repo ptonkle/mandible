@@ -39,7 +39,6 @@
  "Rank": "An upgrade's level: I, II or III.",
  "Colony Upgrade": "An upgrade for every species.",
  "Species Upgrade": "An upgrade for one species.",
- "Combat Ants": "Every ant out now that is not a Gatherer or Builder.",
  "Edge Pan Speed": "How fast the view moves at the screen edge.",
  "Larva": "The least capable AI.",
  "Pupa": "A moderately capable AI.",
@@ -64,5 +63,6 @@
  "Fog of War": "Everything a colony cannot see right now. Off shows the whole map.",
  "Map Type": "The shape of the map: Tunnels, Open Ground or Maze.",
  "Open Ground": "A Map Type: open ground with blobs of rock.",
- "Maze": "A Map Type: open ground crossed by thin rock walls, with gaps."
+ "Maze": "A Map Type: open ground crossed by thin rock walls, with gaps.",
+ "Army": "Every ant out now that is not a Gatherer or Builder."
 }
