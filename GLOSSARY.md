@@ -61,10 +61,19 @@ How to read the tables:
 | 1v1, 2v2 | ★ | Formats, written exactly this way. | 1 vs 1, one-on-one |
 | Free-for-all | ◆ | Four colonies, each its own team (the request's "1v1v1v1"). | FFA (in UI text), 1v1v1v1 (in UI text) |
 | Victory / Defeat | ◆ | The end state of a match for each team. A colony is defeated when it has nothing left that is an ant or can make ants: all its ants and queens have died and all its hatcheries are destroyed. It is also defeated when it concedes. Walls and brood cells do not keep a colony alive. | win/lose screens with other wording, "game over" |
+| Match Length, Trained, Killed, Lost, Gathered | ◆ | End-screen rows: how long the match lasted, and how many ants the colony trained, killed and lost, and what it gathered. | score, kills, deaths, K/D |
+| Waiting On, Resyncing, Player Left | ◆ | Online status flags: a player's turns are late; the match is re-copying from the coordinator; a player left and the AI took over. | lag, desync (in UI text), disconnected |
 | Concede | ★ | To give up the match on purpose. The colony is defeated at once. | surrender, quit, forfeit, GG |
 | Eliminated | ◆ | A colony that has been defeated while the match goes on (2v2, Free-for-all). | dead, knocked out, out |
 | Lobby | ◆ | The online room before a match, where players join and match settings are chosen. | room, party, queue |
 | Host | ◆ | The player who created the lobby. | owner, admin |
+| Room Code | ◆ | The name two or more players type to meet online. | lobby code, room id, server |
+| Invite Code, Reply Code | ◆ | The two codes of the pasted-code path: the host gives an Invite Code, the joiner answers with a Reply Code. No relay is used. | offer, answer, SDP, token |
+| Join, Connect, Leave | ◆ | Online actions: Join a room, Connect after pasting codes, Leave a lobby. | enter, link up, quit (in the lobby) |
+| Seat | ◆ | One place in a match, shown by its player color. | slot, spot, position |
+| You | ◆ | The local player's seat. | me, player 1 |
+| Open, Closed | ◆ | Lobby seat states: Open waits for a player; Closed is not played. An Open seat at Start is filled by a Pupa AI. | empty, locked (that is the tier gate) |
+| Blue, Orange, Green, Pink | ◆ | The player colors of seats 1–4, chosen to be easy to tell apart. | red, purple, team color |
 
 ## 2. Map
 
@@ -191,12 +200,16 @@ Rejected names. Do not reuse them without passing the naming test.
 | Unlock | ◆ | To become available because of a tier. | enable, open |
 | Locked | ◆ | Not yet available. The tooltip shows "Requires Tier 2". | disabled (that is the match setting), greyed |
 | Disabled | ★ | Turned off in the match settings, for the whole match. | locked (that is the tier gate), banned |
+| Ready, Queued, Max Rank, Active | ◆ | Action button states: Ready to use; Queued (already in the queue); Max Rank (no rank left); Active (the current mode or setting). | available, pending, maxed, selected |
+| Upgrade Complete | ◆ | Notice when an upgrade's rank is reached. | researched, done |
 
 ## 7. Stats and combat
 
 | Term | Origin | Meaning | Never say |
 | --- | --- | --- | --- |
 | Health | ★ | Damage an ant, queen, wall or blueprint can take before it dies or is destroyed. | HP (in UI text), hit points, life |
+| Cost | ★ | What something takes from the stockpile, as icon + number per resource. | price |
+| None | ◆ | A cost or value of nothing. | free, n/a, — |
 | Damage | ★ | What one attack deals before armor. | attack (as a stat), power, strength, DPS |
 | Armor | ★ | A flat number subtracted from every hit taken: damage taken = Damage − Armor. | defense, shield, resistance, protection |
 | Range | ★ | How far an ant can attack, in ant-lengths. Melee range is contact. | reach, distance |
@@ -208,6 +221,12 @@ Rejected names. Do not reuse them without passing the naming test.
 | Attack | ★ | The verb: one ant hitting a target. | (never a stat name) |
 | Target | ◆ | What an ant is attacking. Chosen automatically. | focus, aggro |
 | Splash | ◆ | Damage dealt to every enemy in an area, as with Exploding Ants and Dinosaur Ants. | AoE (in UI text), blast |
+| Duration | ★ | How long training, research or evolving takes, in seconds. | time, build time, cooldown |
+| Effect | ◆ | What an upgrade or structure changes, as a label–value row. | bonus, buff |
+| Next | ◆ | The tier an Evolve reaches. | upcoming |
+| Status | ◆ | A short state label in a tooltip or the lobby. | info, state |
+| Very Slow, Slow, Normal, Fast, Very Fast | ◆ | Move Speed shown as a word in tooltips. | numbers in tooltips |
+| cells | ◆ | The unit for Range, Vision and Splash: one cell is about one ant wide. | tiles, squares, meters |
 
 ## 8. Player actions
 
@@ -215,6 +234,7 @@ Rejected names. Do not reuse them without passing the naming test.
 | --- | --- | --- | --- |
 | Action | ★ | Anything the player can do from the action grid: train, place, upgrade, evolve, retreat. | ability, command, order, spell |
 | Waypoint | ★ | A map point where every ant of one species goes. A species can have several. | rally point, flag, marker, target, move order |
+| All Ants | ★ | The Waypoints-tab button that sets one waypoint for every combat species at once, replacing theirs. | everyone, all units, army |
 | Set Waypoint | ★ | Place a waypoint for a species. | order, command, send |
 | Clear Waypoint | ★ | Remove one waypoint (right-click it). | delete, cancel, remove |
 | Split | ★ | How a species shares itself evenly between its waypoints. | spread, divide |
@@ -225,6 +245,11 @@ Rejected names. Do not reuse them without passing the naming test.
 | Queue Bar | ★ | The row of icons beside the resource counts that shows the queue. | production bar, build queue |
 | Cancel | ◆ | Remove an item from the queue and get its resources back. | delete, dequeue |
 | Retreat | ★ | A toggle. While on, every ant except Gatherers and Builders pulls back towards its colony's nests. | recall, fall back, return, regroup |
+| Gather Focus | ◆ | Which resource Harvester Ants favour: Balanced (Food 2 : Nectar 1 : Leaves 1), or Food, Nectar or Leaves (3 : 1 : 1 toward it). | priority, eco setting, worker split |
+| Balanced | ◆ | The default Gather Focus. | even, default |
+| Placement Blocked | ◆ | Notice: the blueprint cannot go there (rock, another structure, a node, not explored, or too far from a queen). | invalid placement, can't build here |
+| Not Enough | ◆ | Notice prefix for a missing resource: "Not Enough Nectar". | insufficient, need more |
+| Requires | ◆ | Label for what an action still needs: a tier, a hatchery or a queen. | needs, prerequisite |
 | Select | — | **There is no selection in this game.** Never use this word for gameplay. | |
 
 ## 9. Interface
@@ -234,6 +259,9 @@ Rejected names. Do not reuse them without passing the naming test.
 | Action Grid | ★ | The keyboard-shaped grid of action buttons at the bottom left. | command card, hotbar, toolbar, ability bar |
 | Action Button | ◆ | One cell of the action grid. | slot, icon, tile |
 | Grid Tab | ◆ | One page of the action grid, if there are more actions than buttons (for example Ants, Queens, Upgrades). *Still open.* | page, menu, category |
+| Ants, Build, Waypoints, Upgrades, Colony | ◆ | The five grid tabs, on keys 1–5. | units, buildings, research, economy |
+| Pan, Edge Pan | ◆ | Moving the view: Pan with the arrow keys or by dragging; Edge Pan moves it when the pointer touches the screen edge. | scroll, camera move |
+| Benchmark | ★ | The Player Settings button that runs the performance-test scenario live, with its budget. | perf test, stress test |
 | Hotkey | ★ | The key that triggers an action button. It follows the button's position on the keyboard. | shortcut, keybind (that is the setting), key |
 | Keybinds | ★ | The Player Settings screen where hotkeys are remapped. | controls, key mapping |
 | Resource Bar | ◆ | The top display of Food, Nectar and Leaves, each with its income, plus population. | HUD, resource panel |
@@ -268,12 +296,20 @@ Rejected names. Do not reuse them without passing the naming test.
 | Term | Origin | Meaning | Never say |
 | --- | --- | --- | --- |
 | Main Menu | ★ | The first screen. | title screen, home, start menu |
+| Menu | ◆ | The in-match menu (Esc): Resume, Concede. | pause menu, options |
+| Resume | ◆ | Close the Menu and carry on. | continue, unpause |
+| Map Size, Chamber Size | ★ | Match Settings for the size of the map and of its chambers: Small, Normal or Large. | map scale, room size |
+| Hill Won, Hill Ended | ◆ | Announcements when a Hill closes: won by a team, or ended with no single holder. | captured, tied |
 | Play vs AI | ★ | Main-menu choice: a local match against AI players. | skirmish, single player, practice |
 | Online Multiplayer | ★ | Main-menu choice: create or join a lobby. | online, PvP, versus |
 | Match Settings | ★ | The options that shape a match: chamber size, tunnel width, resource density, disabled species, game speed, starting resources, biome, format, and so on. | game settings, options, rules, config |
 | Default Match Settings | ★ | The match settings saved from the main menu, which a new lobby or Play vs AI match starts from. | presets, defaults (alone) |
 | Player Settings | ★ | Personal options that never affect a match: keybinds, volume, and so on. | options, preferences, settings (alone) |
 | Game Speed | ★ | A match setting that scales how fast time runs. | tick rate, speed (alone) |
+| Small, Normal, Large / Low, Normal, High | ◆ | Values of Map Size and Chamber Size (Small, Normal, Large) and of Resource Density and Starting Resources (Low, Normal, High). | tiny, huge, rich, poor |
+| On, Off | ◆ | Values of two-way settings such as Events and Edge Pan. | yes, no, enabled |
+| Random | ◆ | A Biome or Seed chosen by the game. | auto |
+| Events | ★ | The Match Setting that turns Windfalls and Hills on or off. | random events |
 | Resource Density | ★ | A match setting for how much each node holds and how many nodes there are. | richness, abundance |
 | Starting Resources | ★ | A match setting: the stockpile each colony begins with. | starting bank, initial resources |
 | Campaign | ★ | Story mode. Later, not in the first version. | story, missions |
