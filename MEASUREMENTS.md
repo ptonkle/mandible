@@ -15,3 +15,4 @@ The starting state, measured rather than recalled, so later changes can be compa
 | AI ladder | `cargo test --release -p tool_core --test ai -- --ignored --nocapture` | Imago beat Pupa 10/10 (median about 4,000 ticks, 6.7 min); Pupa beat Larva 10/10 (median about 3,900 ticks) | 2026-10-11 |
 | Full check | `./scripts/check.sh` | BUILDER CHECK PASSED (fmt, clippy, tests, wasm build, import audit, three engines) | 2026-10-11 |
 | Online check | `./scripts/check-online.sh` | ONLINE CHECK PASSED and ONLINE MATCH CHECK PASSED in chromium, firefox, webkit | 2026-10-11 |
+| After the triage pass (20 ticks per second) | ladder, perf, check.sh, check-online.sh | Imago beat Pupa 10/10 (median 6,788 ticks = 5:39), Pupa beat Larva 10/10 (median 5,869 = 4:53); 2.7 ms average tick, 7.5 ms worst, 1,200 ants; BUILDER CHECK PASSED; ONLINE CHECK PASSED in three engines | 2026-10-11 |

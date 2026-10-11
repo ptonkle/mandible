@@ -35,6 +35,17 @@ The Builder template became a playable ant-colony RTS. Its parts:
   - `build.sh` verifies and copies `web/vendor/`.
 - **R7 is unchanged:** nothing leaves the page's origin until a player presses Host or Join.
 
+## Triage pass (2026-10-11)
+
+All 30 rows of `TRIAGE.md` are done, by three parallel agents (interface, graphics, simulation) and merged here. The biggest changes:
+- **Speed:** the simulation runs at 20 ticks per second, so ants move 2× faster; every duration goes through `rules::ticks`.
+- **Building:** only Leaves are carried, and Carpenter Ants carry 50. Walls go up to 64 cells, in sections of 8.
+- **New features:** Auto-Scout, Map Revealed, Sandbox (with local Pause and Time Scale), spectated all-AI matches, and a simple Online screen (codes only with `?codes`).
+- **Graphics:** distinct species silhouettes, and new icons, waypoint flags and hit effects.
+- **Interface:** the HUD updates in place, so clicks and hovers are reliable.
+
+The details are in `SECOND-ORDER.md` rows 37–40.
+
 ## What passed
 
 `./scripts/check.sh` on 2026-10-11, commit `23c8f2a` (plus this file and MEASUREMENTS.md):
@@ -62,7 +73,8 @@ Slow checks (run by hand, results in `MEASUREMENTS.md`):
 
 Open rows in `SECOND-ORDER.md`. Those marked *person* are decisions for the person:
 
-- **Row 36, match length.** Matches run about 6.5 minutes, not 5. Food is the main lever.
+- **Row 36, match length.** Now a median of 5:39 (Imago v Pupa) and 4:53 (Pupa v Larva) at 20 ticks per second.
+- **Row 40:** the name "Map Revealed".
 - **Row 25, Train 10 modifier.** Ctrl+W cannot be caught by a web page, so Alt also gives Train 10.
 - **Row 27, the game's name.** "Ant Colony" is a placeholder.
 - **Row 31, Room Code play.** Online by Room Code, through the public relays, is untested: try it by hand. HTTPS hosting is needed across machines. There is no TURN server, so two players both behind strict NATs cannot connect (row 10).
