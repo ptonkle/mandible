@@ -81,6 +81,19 @@ pub enum Biome {
     Random,
 }
 
+/// The shape of a generated map (TRIAGE row 33).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum MapType {
+    /// Chambers joined by tunnels.
+    #[default]
+    Tunnels,
+    /// Open ground with blobs of rock.
+    Open,
+    /// Open ground crossed by thin, connected rock walls.
+    Maze,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum Difficulty {
@@ -107,6 +120,7 @@ pub struct MatchSettings {
     pub map_revealed: bool,
     /// Sandbox: human colonies have unlimited resources and start at Tier 3.
     pub sandbox: bool,
+    pub map_type: MapType,
 }
 
 impl Default for MatchSettings {
@@ -124,6 +138,7 @@ impl Default for MatchSettings {
             disabled: Vec::new(),
             map_revealed: false,
             sandbox: false,
+            map_type: MapType::Tunnels,
         }
     }
 }
