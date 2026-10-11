@@ -46,6 +46,14 @@ All 30 rows of `TRIAGE.md` are done, by three parallel agents (interface, graphi
 
 The details are in `SECOND-ORDER.md` rows 37–40.
 
+## Deployed (stage 8, 2026-10-11, by the person's decision)
+
+- **Home page:** https://ptonkle.github.io/, with the game at https://ptonkle.github.io/mandible/.
+- **Repository:** `ptonkle/ptonkle.github.io`, public, served by GitHub Pages from `main`. Its local copy is `~/slop/ptonkle.github.io`. Only the built game is published; the source stays local.
+- **Updating:** `./scripts/pages.sh` rebuilds the game and copies it into that folder. Then commit and push there. The site's commits use author `ptonk <65458712+ptonkle@users.noreply.github.com>`.
+- **Privacy:** the published files hold no personal names. `build.sh` maps the home folder to `~` in paths embedded in the wasm.
+- **Check:** `BUILDER_ORIGIN=https://ptonkle.github.io/mandible .venv/bin/python tests/browser/check.py` passed in chromium, firefox and webkit, against the live site.
+
 ## What passed
 
 `./scripts/check.sh` on 2026-10-11, commit `23c8f2a` (plus this file and MEASUREMENTS.md):
