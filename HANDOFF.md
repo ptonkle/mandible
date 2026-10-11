@@ -6,12 +6,82 @@ A fresh session starts from this file, not from memory.
 
 ## What changed
 
+The Builder template became a playable ant-colony RTS. Its parts:
+
+- **Core** (`crates/core`): every rule.
+  - **Map:** seeded, rotation-symmetric map generation, with tunnels at least Tunnel Width wide.
+  - **Simulation:** integer and deterministic, run at 10 ticks per second.
+  - **Movement and sight:** flow-field pathfinding (Walk, Dig, Fly) and line-of-sight fog.
+  - **Economy:** automatic Harvester Ants with Gather Focus and saturation, and blueprints whose cost Carpenter Ants carry.
+  - **Production:** separate training and research queues per queen or hatchery, with housing and the pop cap.
+  - **Content:** 12 species, colony and species upgrades, three tiers.
+  - **Combat:** flat armor (minimum 1), splash, healing and digging.
+  - **Match flow:** events (Windfall, Hill) and victory.
+  - **AI:** Larva, Pupa and Imago, running inside the simulation.
+  - **Online:** lockstep with a lobby, per-player turns, resync, agreed drops and host migration.
+  - **App:** screens, settings, keybinds, action grid, tooltips and HUD.
+  - **Drawing:** the renderer's draw lists.
+- **Shim** (`crates/shim`): `Game` (the app) and `Bench` (the Benchmark). Every method is one call into the core.
+- **Page** (`web/`):
+  - `index.html` and `app.js` build the DOM from the core's view model.
+  - `render.js` replays draw lists.
+  - `online.js` holds the WebRTC transport, with Trystero 0.25.4 vendored and sha256-pinned.
+  - `bench.html` is the Benchmark page.
+- **Text** (`data/`): every on-screen word (`strings.json`) and the term hints (`glossary.json`), checked against `GLOSSARY.md` by `crates/core/tests/glossary.rs`.
+- **Builder rule changes**, all recorded in the table in `BUILDER-SPEC.md`:
+  - the CSP's connect-src adds the pinned Nostr relays;
+  - `online.js` may name `RTCPeerConnection`;
+  - `online-config.js` may hold numbers and `wss://` URLs;
+  - `build.sh` verifies and copies `web/vendor/`.
+- **R7 is unchanged:** nothing leaves the page's origin until a player presses Host or Join.
+
 ## What passed
 
-Paste the last lines of `./scripts/check.sh`, with the date and commit.
+`./scripts/check.sh` on 2026-10-11, commit `23c8f2a` (plus this file and MEASUREMENTS.md):
+
+```
+== 5/6 WebAssembly import audit (scripts/wasm_imports.py)
+WASM IMPORT AUDIT PASSED
+== 6/6 browser check (tests/browser/check.py)
+BROWSER CHECK PASSED in chromium, firefox, webkit
+BUILDER CHECK PASSED
+```
+
+`./scripts/check-online.sh`, same commit:
+
+```
+ONLINE CHECK PASSED in chromium, firefox, webkit
+ONLINE MATCH CHECK PASSED in chromium, firefox, webkit
+```
+
+Slow checks (run by hand, results in `MEASUREMENTS.md`):
+- **Performance:** 2.8 ms average tick with 1,200 ants.
+- **AI ladder:** Imago beat Pupa 10/10 and Pupa beat Larva 10/10.
 
 ## What remains
 
-Open notebook rows, triage rows, and what the person should check by hand.
+Open rows in `SECOND-ORDER.md`. Those marked *person* are decisions for the person:
+
+- **Row 36, match length.** Matches run about 6.5 minutes, not 5. Food is the main lever.
+- **Row 25, Train 10 modifier.** Ctrl+W cannot be caught by a web page, so Alt also gives Train 10.
+- **Row 27, the game's name.** "Ant Colony" is a placeholder.
+- **Row 31, Room Code play.** Online by Room Code, through the public relays, is untested: try it by hand. HTTPS hosting is needed across machines. There is no TURN server, so two players both behind strict NATs cannot connect (row 10).
+- **Row 13, Gather Focus.** A new player action that the brief did not mention.
+- **GLOSSARY.md:** many rows added during the build are marked ◆ (proposed) and need the person's review.
+- **Row 33, Benchmark labels.** They are constants in `bench.rs`, not `data/`. Enemy structures seen earlier are not remembered in fog.
+
+Check by hand (stage 7, record in `TRIAGE.md`):
+- Play a whole match against each difficulty.
+- Try every grid tab, walls (drag), waypoints (several per species; right-click to clear), Retreat, Evolve, and an expansion queen.
+- Change the Match Settings and confirm they are kept after a reload.
+- Remap a hotkey.
+- Open the Benchmark in a normal (non-headless) browser and judge the frame rate.
+- Read the tooltips and term hints for wording.
 
 ## What the next session must not assume
+
+- Identifiers banned in the core (`time`, `net`, `env`, `io`, `rand`, …) are banned even as field names. The boundary test reads every file in `crates/core/src`.
+- The page's JavaScript may hold no number other than 0 and 1. Pass numbers from the core.
+- Every new on-screen word needs a glossary row first. `tests/glossary.rs` fails otherwise.
+- The AI ladder and performance tests are `#[ignore]`d and are not part of `check.sh`. Rerun them in release after any rules, map or AI change.
+- `tool_core` builds with `opt-level = 3` in dev and test (root `Cargo.toml`). The simulation tests depend on it for speed.
