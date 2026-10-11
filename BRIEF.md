@@ -78,7 +78,7 @@ The same request, sorted by theme. Every point comes from the request above. Wor
   - ranged ants, including one that sprays acid (**Acid Ant**);
   - melee ants;
   - a tanky species (**Turtle Ant**);
-  - a fast species (**Fire Ant**);
+  - a weak, fast species (**Fire Ant**);
   - a species that flies over walls (**Flying Ant**);
   - a dedicated gatherer that is good at bringing resources home, perhaps carrying more or slowing down less while **laden**;
   - perhaps a healer;
@@ -178,7 +178,7 @@ The person answered 1–3 on 2026-10-10. For 4–12 the person asked the agent t
 
 | # | Question | Decision | By |
 | --- | --- | --- | --- |
-| 1 | How does a colony lose? | When all of its things are destroyed. A player can also **concede** at any time. *[Read as: every ant and queen has died and every hatchery and brood cell is destroyed; walls and blueprints alone do not keep a colony alive, so that a lone wall cannot stall a match. To confirm.]* | person |
+| 1 | How does a colony lose? | When it has nothing left that is an ant or can make ants: every ant and queen has died and every hatchery is destroyed. Walls, brood cells and blueprints do not keep a colony alive (confirmed by the person). A player can also **concede** at any time. | person |
 | 2 | Who carries resources to blueprints? | Builders (Carpenter Ants). | person |
 | 3 | What is a drop-off? | Only queens. A gatherer delivers by bringing its **inventory** to a queen. | person |
 | 4 | How is a nest founded? | By placing a queen blueprint in a chamber, which Carpenter Ants then build. | agent |
@@ -222,7 +222,7 @@ Content, data, anything pedagogical, and anything outside `BUILDER-SPEC.md`.
 
 One paragraph: what the agent may do alone, what it must ask about, and what it may never do. State here whether the plan is approved in advance.
 
-*[Draft by the agent, for the person to confirm or edit.]*
+The person chose autonomous mode on 2026-10-10.
 
 - **Alone:** write and refactor code, tests and docs; choose numbers and balance within the plan; add glossary terms (marked proposed); commit locally.
 - **Ask first:**
@@ -232,7 +232,7 @@ One paragraph: what the agent may do alone, what it must ask about, and what it 
   - renaming an approved glossary term;
   - anything that costs money or uses a new third-party service, such as TURN.
 - **Never:** deploy; push to a remote without being asked; loosen a check to make it pass.
-- **Plan approved in advance:** no. The agent writes `PLAN.md` and waits for the person to read it.
+- **Plan approved in advance:** yes. The agent writes `PLAN.md` and continues building without waiting for the person to read it. Every other "Ask first" item above still applies.
 
 ## Allowed core dependencies
 

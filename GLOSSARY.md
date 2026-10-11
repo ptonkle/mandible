@@ -2,7 +2,7 @@
 
 The single source of the game's vocabulary. Every name in the code, the on-screen text (`data/`), the docs and conversation comes from this file.
 
-**Status: proposed.** These terms wait for the person's approval. Once approved, a term changes only by editing this file first.
+**Status: approved by the person on 2026-10-10.** A term changes only by editing this file first. New terms are added as proposed (◆) until the person sees them.
 
 How to read the tables:
 
@@ -60,7 +60,7 @@ How to read the tables:
 | Format | ◆ | Who plays against whom: 1v1, 2v2 or Free-for-all. | mode (reserved for menu choices) |
 | 1v1, 2v2 | ★ | Formats, written exactly this way. | 1 vs 1, one-on-one |
 | Free-for-all | ◆ | Four colonies, each its own team (the request's "1v1v1v1"). | FFA (in UI text), 1v1v1v1 (in UI text) |
-| Victory / Defeat | ◆ | The end state of a match for each team. A colony is defeated when all its ants and queens have died and all its hatcheries and brood cells are destroyed, or when it concedes. | win/lose screens with other wording, "game over" |
+| Victory / Defeat | ◆ | The end state of a match for each team. A colony is defeated when it has nothing left that is an ant or can make ants: all its ants and queens have died and all its hatcheries are destroyed. It is also defeated when it concedes. Walls and brood cells do not keep a colony alive. | win/lose screens with other wording, "game over" |
 | Concede | ★ | To give up the match on purpose. The colony is defeated at once. | surrender, quit, forfeit, GG |
 | Eliminated | ◆ | A colony that has been defeated while the match goes on (2v2, Free-for-all). | dead, knocked out, out |
 | Lobby | ◆ | The online room before a match, where players join and match settings are chosen. | room, party, queue |
@@ -141,7 +141,7 @@ How to read the tables:
 | Harvester Ant | ◆ | Gatherer | 1 | "Harvester" says gathering. It is also a real ant. It carries more, and slows down less when laden. |
 | Soldier Ant | ◆ | Melee | 1 | "Soldier" says fighter. It is the basic melee ant. |
 | Carpenter Ant | ★ | Builder | 1 | "Carpenter" says builder. It is also a real ant. |
-| Fire Ant | ★ | Melee | 2 | The person's choice: fast. *Risk: players may expect burning damage rather than speed. Its art and role tag should show speed clearly.* |
+| Fire Ant | ★ | Melee | 2 | A weak, fast ant. The name is the person's choice, kept knowing that players may first expect burning damage. |
 | Turtle Ant | ★ | Tank | 2 | "Turtle" says shell and toughness. It is also a real ant. |
 | Acid Ant | ★ | Ranged | 2 | "Acid" says it sprays something. It replaces Wood Ant, which players would not link to acid. It is not a strict common name, but the request itself says "acid ants". |
 | Nurse Ant | ◆ | Support | 2 | "Nurse" says healer. |
