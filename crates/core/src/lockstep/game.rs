@@ -49,7 +49,8 @@ pub const DROP_AFTER_MS: i64 = 15_000;
 const START_RETRY_MS: i64 = 300;
 const PING_EVERY_MS: i64 = 1_000;
 const MIN_DELAY: u32 = 2;
-const MAX_DELAY: u32 = 6;
+/// 12 ticks is 600 ms at 20 ticks per second (Normal), as 6 was at 10.
+const MAX_DELAY: u32 = 12;
 /// Turns at or after `next_tick - REPORT_WINDOW` go in a drop report.
 const REPORT_WINDOW: u32 = 32;
 /// Turns older than `next_tick - KEEP_TURNS` are forgotten.
