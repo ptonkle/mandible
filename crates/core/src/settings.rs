@@ -78,7 +78,30 @@ pub enum Biome {
     #[default]
     Picnic,
     FlowerField,
+    /// Leaf litter, twigs and pine needles on dark loam (TRIAGE row 44).
+    ForestFloor,
+    /// Pebbles, reeds and puddles by a stream (TRIAGE row 44).
+    Riverbank,
     Random,
+}
+
+impl Biome {
+    /// Every biome a map can have (Random excluded).
+    pub const ALL: [Biome; 4] = [
+        Biome::Picnic,
+        Biome::FlowerField,
+        Biome::ForestFloor,
+        Biome::Riverbank,
+    ];
+
+    /// Random becomes one of the four, chosen by the seed, the same on every
+    /// peer; any other biome stays itself.
+    pub fn resolve(self, seed: u64) -> Biome {
+        match self {
+            Biome::Random => Biome::ALL[(seed % Biome::ALL.len() as u64) as usize],
+            b => b,
+        }
+    }
 }
 
 /// The shape of a generated map (TRIAGE row 33).

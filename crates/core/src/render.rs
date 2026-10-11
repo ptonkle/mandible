@@ -934,16 +934,7 @@ pub fn assets_json() -> String {
 
 /// The biome actually drawn: Random picks one from the seed.
 pub fn biome_of(world: &World) -> Biome {
-    match world.settings.biome {
-        Biome::Random => {
-            if world.seed.is_multiple_of(2) {
-                Biome::Picnic
-            } else {
-                Biome::FlowerField
-            }
-        }
-        b => b,
-    }
+    world.settings.biome.resolve(world.seed)
 }
 
 /// Changes whenever the ground changes (dirt dug away), so the app knows to

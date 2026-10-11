@@ -368,6 +368,9 @@ pub struct Colony {
     /// Deliveries per tick for the last 10 seconds, for Income.
     pub income_ring: Vec<Cost>,
     pub tally: Tally,
+    /// A Sample every `SAMPLE_TICKS`, for the end-of-match graphs.
+    #[serde(default)]
+    pub history: Vec<Sample>,
     pub ai: crate::ai::AiState,
 }
 
@@ -450,6 +453,26 @@ pub struct World {
     #[serde(skip)]
     pub grid: crate::ants::Buckets,
 }
+
+/// One moment of a colony's match, for the end-of-match graphs (TRIAGE row
+/// 39). Recorded every `SAMPLE_TICKS` (10 seconds).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct Sample {
+    pub tick: i32,
+    pub stock: Cost,
+    /// Gathered since the start (cumulative).
+    pub gathered: Cost,
+    pub population: i32,
+    /// Pop Cost of combat ants.
+    pub army: i32,
+    /// Gatherers and Builders.
+    pub workers: i32,
+    pub killed: i32,
+    pub lost: i32,
+    pub tier: u8,
+}
+
+pub const SAMPLE_TICKS: i32 = 10 * TICKS_PER_SECOND;
 
 /// Why a command was refused, shown to its colony as a notice.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -571,6 +594,7 @@ impl World {
                 waypoints: vec![Vec::new(); Species::ALL.len()],
                 income_ring: vec![[0; 3]; INCOME_TICKS],
                 tally: Tally::default(),
+                history: Vec::new(),
                 ai: Default::default(),
             });
             w.visible.push(Bits::new(n));
@@ -866,6 +890,9 @@ impl World {
             self.update_fog();
         }
         self.effects.retain(|e| e.until > self.tick);
+        if self.tick % SAMPLE_TICKS == 0 {
+            self.sample();
+        }
         self.check_victory();
         self.sandbox_refill();
     }
@@ -1588,6 +1615,37 @@ impl World {
                 });
                 self.announce(&format!("announce.windfall.{}", res.key()), None, Some(pos));
             }
+        }
+    }
+
+    /// Records a Sample for every colony still in the match.
+    fn sample(&mut self) {
+        for ci in 0..self.colonies.len() {
+            if self.colonies[ci].defeated {
+                continue;
+            }
+            let colony = ci as u8;
+            let (mut army, mut workers) = (0, 0);
+            for a in self.ants.iter().filter(|a| a.colony == colony) {
+                if a.species.is_combat() {
+                    army += a.species.stats().pop;
+                } else {
+                    workers += 1;
+                }
+            }
+            let c = &self.colonies[ci];
+            let s = Sample {
+                tick: self.tick,
+                stock: c.stock,
+                gathered: c.tally.gathered,
+                population: self.population(colony),
+                army,
+                workers,
+                killed: c.tally.killed,
+                lost: c.tally.lost,
+                tier: c.tier,
+            };
+            self.colonies[ci].history.push(s);
         }
     }
 

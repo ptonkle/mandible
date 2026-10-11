@@ -83,7 +83,7 @@ How to read the tables:
 | Map | ★ | The whole playing area of a match. | level, arena, board, world |
 | Seed | ◆ | The number that fully determines a generated map. The same seed gives the same map. | map code, map ID |
 | Biome | ◆ | The visual setting of a map, such as Picnic or Flower Field. It changes art only, never rules. | theme, setting (reserved for settings), environment |
-| Picnic, Flower Field | ★ | The first two biomes. | |
+| Picnic, Flower Field, Forest Floor, Riverbank | ★ | The biomes. Picnic and Flower Field came first; Forest Floor and Riverbank were added at the person's request (TRIAGE row 44). Biome changes art only, never rules. | |
 | Tunnel | ★ | A long, narrow passage that connects chambers. | corridor, path, lane, passage |
 | Chamber | ★ | An open room in the map. | room, cave, cavern, area |
 | Width | ◆ | Tunnel width, measured in ant-widths. The minimum is about 10. | size (for tunnels) |

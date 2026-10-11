@@ -268,5 +268,7 @@
  "setting.map_type": "Map Type",
  "map_type.tunnels": "Tunnels",
  "map_type.open": "Open Ground",
- "map_type.maze": "Maze"
+ "map_type.maze": "Maze",
+ "biome.forest_floor": "Forest Floor",
+ "biome.riverbank": "Riverbank"
 }

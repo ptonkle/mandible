@@ -1146,3 +1146,16 @@ fn ants_walk_twice_as_fast_and_durations_keep_their_real_time() {
     let cells = a.pos.dist(Pos::of_cell(x, y)) / CELL;
     assert!((20..=25).contains(&cells), "walked {cells} cells in 4 s");
 }
+
+#[test]
+fn colonies_record_a_sample_every_ten_seconds() {
+    let mut w = world(30);
+    run(&mut w, tool_core::world::SAMPLE_TICKS * 3);
+    let h = &w.colonies[0].history;
+    assert_eq!(h.len(), 3);
+    assert_eq!(h[2].tick, tool_core::world::SAMPLE_TICKS * 3);
+    // Six Harvester Ants, two Carpenter Ants: 8 workers; 2 Soldier Ants: 2 army.
+    assert_eq!(h[0].workers, 8);
+    assert_eq!(h[0].army, 2);
+    assert!(h[2].gathered.iter().sum::<i32>() >= h[0].gathered.iter().sum::<i32>());
+}

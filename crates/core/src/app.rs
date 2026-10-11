@@ -588,10 +588,16 @@ impl App {
             self.select(
                 &format!("{prefix}.biome"),
                 "setting.biome",
-                ["picnic", "flower_field", "random"]
-                    .iter()
-                    .map(|v| (v.to_string(), self.t(&format!("biome.{v}"))))
-                    .collect(),
+                [
+                    "picnic",
+                    "flower_field",
+                    "forest_floor",
+                    "riverbank",
+                    "random",
+                ]
+                .iter()
+                .map(|v| (v.to_string(), self.t(&format!("biome.{v}"))))
+                .collect(),
                 biome_key(m.biome),
             ),
             self.select(
@@ -1831,13 +1837,7 @@ impl App {
             Err(_) => self.fresh(),
         };
         let mut settings = self.setup.clone();
-        if settings.biome == Biome::Random {
-            settings.biome = if seed.is_multiple_of(2) {
-                Biome::Picnic
-            } else {
-                Biome::FlowerField
-            };
-        }
+        settings.biome = settings.biome.resolve(seed);
         let mut seats = vec![match self.first_seat {
             Some(d) => SeatKind::Ai(d),
             None => SeatKind::Human,
@@ -2441,13 +2441,7 @@ impl App {
         let (m, out) = Match::new(start.clone(), self.now_ms);
         self.online.outbox.extend(out);
         let mut settings = settings;
-        if settings.biome == Biome::Random {
-            settings.biome = if start.seed.is_multiple_of(2) {
-                Biome::Picnic
-            } else {
-                Biome::FlowerField
-            };
-        }
+        settings.biome = settings.biome.resolve(start.seed);
         let mut world = World::new(start.seed, settings, &seats);
         // Seats nobody sits in (Closed) play as AI too, so the map stays fair.
         for (i, s) in start.seats.iter().enumerate() {
@@ -2623,6 +2617,8 @@ fn biome_key(b: Biome) -> &'static str {
     match b {
         Biome::Picnic => "picnic",
         Biome::FlowerField => "flower_field",
+        Biome::ForestFloor => "forest_floor",
+        Biome::Riverbank => "riverbank",
         Biome::Random => "random",
     }
 }
@@ -2691,6 +2687,8 @@ pub fn apply_setting(m: &mut MatchSettings, field: &str, value: &str) -> bool {
         "biome" => match value {
             "picnic" => m.biome = Biome::Picnic,
             "flower_field" => m.biome = Biome::FlowerField,
+            "forest_floor" => m.biome = Biome::ForestFloor,
+            "riverbank" => m.biome = Biome::Riverbank,
             "random" => m.biome = Biome::Random,
             _ => return false,
         },
