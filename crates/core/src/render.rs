@@ -1836,3 +1836,133 @@ pub fn minimap(world: &World, viewer: Option<u8>, cam: &Camera, size: i32) -> Ve
 #[cfg(test)]
 #[path = "render_tests.rs"]
 mod tests;
+
+// ---- icons ----
+
+/// The draw list for one interface icon, `size` × `size` pixels, in the
+/// colony's player colour: a species, structure, upgrade or action key as
+/// used by the action grid and the queue bar. `None` for an unknown key.
+pub fn icon_list(key: &str, colony: u8, size: i32) -> Option<Vec<i32>> {
+    let cam = Camera::new(size, size);
+    let mut list = List {
+        out: Vec::new(),
+        cam: &cam,
+        w: size * SUB_PX,
+        h: size * SUB_PX,
+    };
+    let c = size * SUB_PX / 2;
+    let colour = player(colony);
+    // A shape spanning about `span` shape units fills 80% of the icon.
+    let fit = |span: i32| size * SUB_PX * SCALE_ONE * 4 / 5 / span.max(1);
+    let ant = |list: &mut List, s: Species| {
+        let r = drawn_radius(s);
+        list.shape(
+            ant_shape_id(s, UP, true),
+            c,
+            c,
+            fit(2 * r),
+            colour,
+            C_INK,
+            24,
+        );
+    };
+    let body = |list: &mut List, kind: StructureKind| {
+        let rr = size * SUB_PX * 9 / 20;
+        let pts: Vec<Pt> = body_unit(body_of(kind))
+            .into_iter()
+            .map(|(x, y)| (c + x * rr / TRIG_ONE, c + y * rr / TRIG_ONE))
+            .collect();
+        list.poly(soft(colony), &pts);
+        list.outline(colour, size * SUB_PX / 16, &pts);
+    };
+    let shape = |list: &mut List, id: i32, span: i32, fill: i32| {
+        list.shape(id, c, c, fit(span), fill, C_INK, 24);
+    };
+    if let Some(s) = key.strip_prefix("species.").and_then(Species::from_key) {
+        ant(&mut list, s);
+        return Some(list.out);
+    }
+    if let Some(rest) = key.strip_prefix("upgrade.species.") {
+        let s = Species::from_key(rest)?;
+        ant(&mut list, s);
+        return Some(list.out);
+    }
+    if let Some(rest) = key.strip_prefix("structure.") {
+        let kind = StructureKind::from_key(rest)?;
+        body(&mut list, kind);
+        let scale = fit(CELL * 3);
+        icon(&mut list, kind, c, c, scale, C_INK);
+        return Some(list.out);
+    }
+    let s = match key {
+        "upgrade.damage" => Species::TrapJaw,
+        "upgrade.armor" => Species::Turtle,
+        "upgrade.health" => Species::Nurse,
+        "upgrade.gather_rate" => Species::Harvester,
+        "upgrade.carry_capacity" => Species::Leafcutter,
+        "upgrade.build_rate" => Species::Carpenter,
+        "action.all_ants" => Species::Soldier,
+        "action.evolve" | "action.retreat" => {
+            shape(&mut list, SH_QUEEN, 180, colour);
+            return Some(list.out);
+        }
+        "focus.food" => {
+            shape(&mut list, SH_CRUMBS, 220, C_INK);
+            return Some(list.out);
+        }
+        "focus.nectar" => {
+            shape(&mut list, SH_PETALS, 220, colour);
+            return Some(list.out);
+        }
+        "focus.leaves" => {
+            shape(&mut list, SH_LEAVES, 220, colour);
+            return Some(list.out);
+        }
+        "focus.balanced" => {
+            shape(&mut list, SH_POLLEN, 220, colour);
+            return Some(list.out);
+        }
+        _ => return None,
+    };
+    ant(&mut list, s);
+    Some(list.out)
+}
+
+#[cfg(test)]
+mod icon_tests {
+    use super::*;
+
+    #[test]
+    fn every_interface_key_has_an_icon() {
+        let mut keys: Vec<String> = Species::ALL
+            .iter()
+            .map(|s| format!("species.{}", s.key()))
+            .collect();
+        keys.extend(
+            StructureKind::all()
+                .iter()
+                .map(|k| format!("structure.{}", k.key())),
+        );
+        keys.extend(
+            crate::rules::Upgrade::all()
+                .iter()
+                .map(|u| format!("upgrade.{}", u.key())),
+        );
+        for k in [
+            "action.all_ants",
+            "action.evolve",
+            "action.retreat",
+            "focus.balanced",
+            "focus.food",
+            "focus.nectar",
+            "focus.leaves",
+        ] {
+            keys.push(k.into());
+        }
+        for k in keys {
+            let list = icon_list(&k, 0, 40).unwrap_or_else(|| panic!("no icon for {k}"));
+            assert!(!list.is_empty(), "{k} draws something");
+        }
+        assert!(icon_list("nonsense", 0, 40).is_none());
+    }
+}

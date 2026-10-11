@@ -125,6 +125,14 @@ impl Session {
         self.app.as_ref().map(|a| a.frame()).unwrap_or_default()
     }
 
+    /// The interface icons for this match (see `App::icons`).
+    pub fn icons(&self) -> String {
+        self.app
+            .as_ref()
+            .map(|a| a.icons().to_string())
+            .unwrap_or_else(|| "{}".into())
+    }
+
     pub fn terrain_stamp(&self) -> u32 {
         self.app.as_ref().map(|a| a.terrain_stamp()).unwrap_or(0)
     }

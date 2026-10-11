@@ -1758,6 +1758,28 @@ impl App {
         render::frame(&g.world, Some(g.me), &g.view, &overlay, g.interp_permille())
     }
 
+    /// Every interface icon for the local colony's colour, as draw lists:
+    /// `{"size": px, "lists": {key: [...]}}`. Empty outside a match.
+    pub fn icons(&self) -> Value {
+        let Some(g) = &self.game else {
+            return json!({"size": 0, "lists": {}});
+        };
+        let mut keys: Vec<String> = Vec::new();
+        for tab in 0..TABS.len() {
+            for b in grid(tab).iter().flatten() {
+                keys.push(button_icon(*b));
+            }
+        }
+        keys.push("action.evolve".into());
+        let mut lists = serde_json::Map::new();
+        for k in keys {
+            if let Some(l) = render::icon_list(&k, g.me, ICON_PX) {
+                lists.insert(k, json!(l));
+            }
+        }
+        json!({"size": ICON_PX, "lists": lists})
+    }
+
     /// Changes when the terrain image must be painted again: a new match,
     /// or dirt dug away.
     pub fn terrain_stamp(&self) -> u32 {
@@ -2070,6 +2092,23 @@ fn place_cost(kind: StructureKind, x: i32, y: i32, x2: i32, y2: i32) -> [i32; 3]
         [base[0] * n, base[1] * n, base[2] * n]
     } else {
         base
+    }
+}
+
+/// Icons are drawn at this many pixels square.
+pub const ICON_PX: i32 = 48;
+
+/// The icon key of a grid button.
+fn button_icon(b: Button) -> String {
+    match b {
+        Button::Train(s) => format!("species.{}", s.key()),
+        Button::Place(k) => format!("structure.{}", k.key()),
+        Button::Waypoint(Some(s)) => format!("species.{}", s.key()),
+        Button::Waypoint(None) => "action.all_ants".into(),
+        Button::Research(u) => format!("upgrade.{}", u.key()),
+        Button::Evolve => "action.evolve".into(),
+        Button::Retreat => "action.retreat".into(),
+        Button::Focus(f) => format!("focus.{}", f.key()),
     }
 }
 

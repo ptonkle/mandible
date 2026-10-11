@@ -111,6 +111,10 @@ table.pairs td:first-child { color: var(--muted); white-space: nowrap; width: 12
   position: relative; font-size: 0.72rem; padding: 0.15rem 0.4rem; border: 1px solid var(--line);
   border-radius: 5px; background: var(--soil-2); cursor: pointer; overflow: hidden; white-space: nowrap;
 }
+.qitem { display: flex; align-items: center; padding: 0.1rem; }
+.qitem .icon { width: 1.9rem; height: 1.9rem; display: block; }
+.gbtn .icon { position: absolute; right: 0.15rem; top: 0.9rem; width: 2.3rem; height: 2.3rem; opacity: 0.95; pointer-events: none; }
+.gbtn .label { position: relative; z-index: 1; text-shadow: 0 1px 2px #000; }
 .qitem .fill { position: absolute; left: 0; bottom: 0; height: 3px; background: var(--accent); }
 .flags { display: flex; gap: 0.5rem; }
 .flag { color: var(--bad); font-weight: 700; font-size: 0.85rem; }
@@ -143,7 +147,7 @@ table.pairs td:first-child { color: var(--muted); white-space: nowrap; width: 12
   border-radius: 8px; cursor: pointer; padding: 0.2rem; display: flex; flex-direction: column;
   justify-content: space-between; text-align: left;
 }
-.gbtn .k { align-self: flex-end; font-weight: 700; color: var(--accent); }
+.gbtn .k { position: relative; z-index: 1; align-self: flex-start; margin-top: auto; font-weight: 700; color: var(--accent); }
 .gbtn.empty { visibility: hidden; }
 .gbtn.ready:hover { background: var(--leaf-dark); }
 .gbtn.unaffordable { color: var(--muted); }

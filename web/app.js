@@ -20,6 +20,8 @@ let hovered = null;
 let renderer = null;
 let assets = null;
 let terrainStamp = null;
+let icons = {};
+let iconsFor = null;
 let fogStamp = null;
 
 function readStore(key) {
@@ -173,8 +175,9 @@ function drawBar(m) {
   const queue = el("queue");
   queue.replaceChildren();
   m.queue.forEach((q) => {
-    const item = make("button", "qitem", q.label);
+    const item = make("button", "qitem");
     item.type = "button";
+    item.append(iconImage(q.icon));
     const fill = make("span", "fill");
     fill.style.width = q.progress;
     item.append(fill);
@@ -216,7 +219,7 @@ function drawGrid(m) {
     } else {
       b.classList.add(g.state);
       if (g.active) b.classList.add("active");
-      b.append(make("span", "label", g.label), make("span", "k", g.key));
+      b.append(iconImage(g.icon), make("span", "label", g.label), make("span", "k", g.key));
       b.addEventListener("click", (e) => sendMods(g.id, e));
       b.addEventListener("mouseenter", () => {
         hovered = g.id;
@@ -342,10 +345,33 @@ function resize() {
 
 // ---- drawing: the core lays out every frame; the page replays it ----
 
+// Icons: the core's draw lists painted once per match into small images.
+function buildIcons() {
+  const data = JSON.parse(game.icons());
+  const canvas = document.createElement("canvas");
+  const painter = createRenderer(canvas, assets);
+  icons = {};
+  Object.keys(data.lists).forEach((key) => {
+    canvas.width = data.size;
+    canvas.height = data.size;
+    painter.draw(Int32Array.from(data.lists[key]));
+    icons[key] = canvas.toDataURL();
+  });
+}
+
+function iconImage(key) {
+  const img = make("img", "icon");
+  img.alt = "";
+  if (icons[key]) img.src = icons[key];
+  return img;
+}
+
 function drawMatch() {
   if (!renderer) renderer = createRenderer(el("map"), assets);
   const ts = game.terrain_stamp();
   if (ts !== terrainStamp) {
+    buildIcons();
+    lastText = "";
     const size = game.terrain_size();
     renderer.setImage(assets.images.terrain, size[0], size[1], game.terrain());
     terrainStamp = ts;

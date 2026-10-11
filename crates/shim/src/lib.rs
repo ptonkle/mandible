@@ -87,6 +87,10 @@ impl Game {
         self.s.frame()
     }
 
+    pub fn icons(&self) -> String {
+        self.s.icons()
+    }
+
     pub fn terrain_stamp(&self) -> u32 {
         self.s.terrain_stamp()
     }
