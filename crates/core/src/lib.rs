@@ -12,13 +12,14 @@
 pub mod ai;
 pub mod ants;
 pub mod api;
+pub mod app;
 pub mod dice;
 pub mod fixed;
 pub mod fog;
+pub mod keys;
 pub mod lockstep;
 pub mod map;
 pub mod nav;
-pub mod page;
 pub mod rules;
 pub mod settings;
 pub mod world;

@@ -8,15 +8,52 @@
        form-action 'none' blocks form posts. A meta policy cannot stop data
        leaving by navigation, so the browser check still watches requests. -->
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'; style-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'">
-  <title>Builder tool</title>
+  <title>Ant Colony</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body data-ready="false">
-  <main>
+  <main id="menus" class="menus" hidden>
     <h1 id="title"></h1>
-    <p id="intro"></p>
+    <div id="panels"></div>
     <p id="message" role="status"></p>
   </main>
+
+  <section id="match" class="match" hidden>
+    <canvas id="map"></canvas>
+    <header id="bar" class="bar">
+      <div id="resources" class="resources"></div>
+      <div id="queue" class="queue"></div>
+      <div id="flags" class="flags"></div>
+      <div id="clock" class="clock"></div>
+    </header>
+    <div id="notices" class="notices" aria-live="polite"></div>
+    <aside id="grid" class="grid">
+      <div id="tabs" class="tabs"></div>
+      <div id="buttons" class="buttons"></div>
+    </aside>
+    <canvas id="minimap" class="minimap"></canvas>
+    <div id="overlay" class="overlay" hidden></div>
+  </section>
+
+  <div id="tooltip" class="tooltip" hidden></div>
+  <div id="hint" class="hint" hidden></div>
+
+  <template id="leaf-template">
+    <button class="leaf" type="button">
+      <svg class="leaf-shape" viewBox="0 0 200 80" aria-hidden="true">
+        <path d="M6 40 C 40 2, 150 2, 194 40 C 150 78, 40 78, 6 40 Z"/>
+        <path class="vein" d="M10 40 L 190 40 M 60 40 L 80 20 M 60 40 L 80 60 M 110 40 L 130 18 M 110 40 L 130 62 M 150 40 L 166 26 M 150 40 L 166 54"/>
+      </svg>
+      <svg class="ant" viewBox="0 0 60 30" aria-hidden="true">
+        <ellipse cx="12" cy="15" rx="10" ry="7"/>
+        <ellipse cx="28" cy="15" rx="6" ry="5"/>
+        <ellipse cx="42" cy="15" rx="7" ry="6"/>
+        <path class="legs" d="M24 12 L 18 2 M 28 12 L 28 1 M 32 12 L 38 2 M 24 18 L 18 28 M 28 18 L 28 29 M 32 18 L 38 28 M 47 11 L 56 4 M 47 19 L 56 26"/>
+      </svg>
+      <span class="leaf-text"></span>
+    </button>
+  </template>
+
   <noscript><p>This page needs JavaScript and WebAssembly.</p></noscript>
   <script type="module" src="app.js"></script>
 </body>
