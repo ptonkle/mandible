@@ -65,5 +65,6 @@
  "Open Ground": "A Map Type: open ground with blobs of rock.",
  "Maze": "A Map Type: open ground crossed by thin rock walls, with gaps.",
  "Army": "Every ant out now that is not a Gatherer or Builder.",
- "Volume": "How loud the game's sounds are: Off, Low, Normal or High."
+ "Volume": "How loud the game's sounds are: Off, Low, Normal or High.",
+"Ready Up": "Press again to undo; the host can Start once every joined player is Readied."
 }

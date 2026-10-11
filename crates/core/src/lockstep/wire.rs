@@ -3,7 +3,9 @@
 use serde::{Deserialize, Serialize};
 
 /// The protocol version. A joiner with a different one is refused.
-pub const PROTOCOL_VERSION: u32 = 1;
+/// 2: Ready Up (`Msg::Ready`, `SeatKind::Human::ready`) and Rematch rounds
+/// (`round` in `Roster` and `Ping`).
+pub const PROTOCOL_VERSION: u32 = 2;
 
 /// No message this module produces is longer than this many bytes.
 pub const MAX_MESSAGE_BYTES: usize = 16 * 1024;
@@ -67,8 +69,17 @@ impl Version {
 pub enum SeatKind {
     Open,
     Closed,
-    Human { client_id: String, name: String },
-    Ai { difficulty: u8 },
+    Human {
+        client_id: String,
+        name: String,
+        /// Ready Up: this joiner is set to start. The host's own seat is
+        /// never marked; the host's Start is its Ready Up.
+        #[serde(default)]
+        ready: bool,
+    },
+    Ai {
+        difficulty: u8,
+    },
 }
 
 /// One seat of the lobby and the match.
@@ -85,6 +96,11 @@ impl Seat {
             SeatKind::Human { client_id, .. } => Some(client_id),
             _ => None,
         }
+    }
+
+    /// A human seat that has pressed Ready Up.
+    pub fn ready(&self) -> bool {
+        matches!(self.kind, SeatKind::Human { ready: true, .. })
     }
 }
 
@@ -121,15 +137,28 @@ pub enum Msg {
         version: u32,
         seats: Vec<Seat>,
         settings: String,
+        /// The lobby's round: 0 for a first lobby, one more for each
+        /// Rematch.
+        #[serde(default)]
+        round: u32,
     },
     TeamRequest {
         team: u8,
+    },
+    /// A joiner's Ready Up (or its undoing), repeated until the roster
+    /// shows it.
+    Ready {
+        ready: bool,
     },
     Leave,
     Dissolve,
     Ping {
         client_id: String,
         stamp: i64,
+        /// The sender's round (see `Roster`): a ping of this round proves
+        /// that everything the sender sent before it was the old match's.
+        #[serde(default)]
+        round: u32,
     },
     Pong {
         stamp: i64,
@@ -199,6 +228,7 @@ impl Msg {
                 | Msg::Refuse { .. }
                 | Msg::Roster { .. }
                 | Msg::TeamRequest { .. }
+                | Msg::Ready { .. }
                 | Msg::Ping { .. }
                 | Msg::Pong { .. }
                 | Msg::Start { .. }

@@ -26,7 +26,7 @@ echo "dist/ assembled"
 step "2/3 transport between tabs (tests/browser/online.py)"
 "$PY" tests/browser/online.py
 
-step "3/3 a match between two tabs (tests/browser/online_match.py)"
+step "3/3 a match between up to four tabs: Ready Up, leave and rejoin, Rematch (tests/browser/online_match.py)"
 "$PY" tests/browser/online_match.py
 
 printf '\n\033[1mONLINE CHECK PASSED\033[0m\n'

@@ -157,6 +157,11 @@ pub struct Match {
     desyncs: u32,
     resyncs: u32,
     outbox: Vec<Outgoing>,
+    /// The lobby round this match began in (see the lobby's Rematch notes).
+    round: u32,
+    /// Peers that have sent a ping of this round; after a rematch, match
+    /// messages from any other peer are the old match's.
+    heard: BTreeSet<PeerId>,
 }
 
 impl Match {
@@ -218,6 +223,8 @@ impl Match {
             desyncs: 0,
             resyncs: 0,
             outbox: Vec::new(),
+            round: start.round,
+            heard: start.heard,
         };
         for (peer, text) in start.early {
             let out = game.receive(&peer, &text, now_ms);
@@ -262,6 +269,36 @@ impl Match {
     /// The input delay in ticks this client is using now.
     pub fn delay(&self) -> u32 {
         self.delay
+    }
+
+    /// The lobby round this match began in: 0 for a first lobby, one more
+    /// for each Rematch.
+    pub fn round(&self) -> u32 {
+        self.round
+    }
+
+    /// Which peer plays which seat, as far as this client knows.
+    pub fn peer_seats(&self) -> &BTreeMap<PeerId, u8> {
+        &self.peer_seats
+    }
+
+    /// A human seat whose player is still here: not dropped, not suspected.
+    /// The local seat is always here.
+    pub fn present(&self, seat: u8) -> bool {
+        seat == self.local_seat
+            || self
+                .players
+                .get(&seat)
+                .is_some_and(|p| p.live() && !p.suspected)
+    }
+
+    /// True when `text` from `peer` is the host's rematch roster: the host
+    /// (seat 0) has gone back to the lobby, and this joiner should follow
+    /// with [`super::Lobby::rejoin`].
+    pub fn is_rematch(&self, peer: &PeerId, text: &str) -> bool {
+        self.local_seat != 0
+            && self.peer_seats.get(peer) == Some(&0)
+            && matches!(Msg::decode(text), Some(Msg::Roster { .. }))
     }
 
     /// The lowest live human seat, which runs resyncs and drops.
@@ -389,6 +426,7 @@ impl Match {
             self.outbox.push(Outgoing::to_all(&Msg::Ping {
                 client_id: self.client_id.clone(),
                 stamp: now_ms,
+                round: self.round,
             }));
         }
         std::mem::take(&mut self.outbox)
@@ -490,6 +528,14 @@ impl Match {
         let Some(msg) = Msg::decode(text) else {
             return Vec::new();
         };
+        if let Msg::Ping { round, .. } = &msg {
+            if *round == self.round {
+                self.heard.insert(peer.clone());
+            }
+        }
+        if self.round > 0 && msg.is_match_kind() && !self.heard.contains(peer) {
+            return Vec::new();
+        }
         match msg {
             Msg::Ping { stamp, .. } => {
                 self.outbox

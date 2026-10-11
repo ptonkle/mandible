@@ -69,19 +69,23 @@ def run(page, check, engine):
     overflow = page.evaluate("() => getComputedStyle(document.getElementById('menus')).overflowX")
     check(overflow == "hidden", f"no horizontal scroll bar while a leaf is dragged away [{overflow}]")
 
-    # Online Multiplayer: one Room Code field, the Status row, Host, Join,
-    # Back. No pasted codes without ?codes. Typed codes are upper-cased.
+    # Online Multiplayer: the Player Name and Room Code fields, the Status
+    # row, Host, Join, Back. No pasted codes without ?codes. Typed codes are
+    # upper-cased, and then Copy appears beside the Room Code.
     page.click("#go\\.online")
     page.wait_for_selector("#online\\.room", timeout=5000)
     buttons = [t.strip() for t in page.locator("#panels .button").all_inner_texts()]
     want = [STRINGS["online.host"], STRINGS["online.join"], STRINGS["menu.back"]]
     check(buttons == want, f"the Online Multiplayer screen offers Host, Join, Back {buttons}")
     fields = page.locator("#panels input, #panels textarea").count()
-    check(fields == 1, f"one Room Code field and no pasted-code fields [{fields}]")
+    named = page.locator("#online\\.name").count()
+    check(fields == 2 and named == 1, f"Player Name, one Room Code field and no pasted-code fields [{fields}]")
     page.fill("#online\\.room", "k7mxp4")
     page.wait_for_timeout(300)
     room = page.input_value("#online\\.room")
     check(room == "K7MXP4", f"a typed Room Code is upper-cased [{room}]")
+    copy = page.locator("#online\\.copy").count()
+    check(copy == 1, f"Copy appears beside a Room Code [{copy}]")
     page.click("#go\\.main_menu")
     page.wait_for_selector("#go\\.play_vs_ai", timeout=5000)
 

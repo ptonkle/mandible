@@ -91,6 +91,9 @@ pub struct PlayerSettings {
     pub edge_pan_speed: usize,
     /// Sound volume step: 0 Off, 1 Low, 2 Normal, 3 High.
     pub volume: u8,
+    /// Player Name, shown in the Lobby and in Waiting On; empty means the
+    /// default ("Player").
+    pub name: String,
 }
 
 impl Default for PlayerSettings {
@@ -100,6 +103,7 @@ impl Default for PlayerSettings {
             edge_pan: true,
             edge_pan_speed: 2,
             volume: 2,
+            name: String::new(),
         }
     }
 }

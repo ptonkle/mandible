@@ -172,7 +172,7 @@ pub fn samples(cue: Cue, volume: i32) -> Vec<i16> {
                     let a = sin64(pos >> 16);
                     let b = sin64((pos >> 16) + 1);
                     let f = (pos & 0xFFFF) as i32;
-                    a + ((b - a) * f >> 16)
+                    a + (((b - a) * f) >> 16)
                 }
                 Wave::Square => {
                     if phase < 0x8000 {
@@ -184,7 +184,7 @@ pub fn samples(cue: Cue, volume: i32) -> Vec<i16> {
                 Wave::Triangle => {
                     let p = phase as i32;
                     let t = if p < 0x8000 { p } else { 0xFFFF - p };
-                    (t * 4 * TRIG_ONE >> 16) - TRIG_ONE
+                    ((t * 4 * TRIG_ONE) >> 16) - TRIG_ONE
                 }
                 Wave::Noise => (noise.below(2 * TRIG_ONE as u32 + 1) as i32) - TRIG_ONE,
             };

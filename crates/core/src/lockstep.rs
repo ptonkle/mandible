@@ -25,7 +25,7 @@ mod rtt;
 mod wire;
 
 pub use game::{Match, MatchStatus, TickInput, CHECKSUM_EVERY, SNAPSHOT_CHUNK_BYTES};
-pub use lobby::{Lobby, LobbyError, LobbyStatus, MatchStart};
+pub use lobby::{clean_name, Lobby, LobbyError, LobbyStatus, MatchStart, MAX_NAME_CHARS};
 pub use rtt::RttWindow;
 pub use wire::{
     Msg, Outgoing, PeerId, RefuseReason, Seat, SeatKind, Target, Version, MAX_MESSAGE_BYTES,
