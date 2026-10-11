@@ -103,6 +103,10 @@ pub enum Command {
     Retreat {
         on: bool,
     },
+    /// While on, one combat ant explores by itself (Auto-Scout).
+    AutoScout {
+        on: bool,
+    },
     Focus {
         focus: Focus,
     },
@@ -263,6 +267,9 @@ pub struct Colony {
     pub ranks: Ranks,
     pub focus: Focus,
     pub retreat: bool,
+    /// Auto-Scout is on. The simulation picks the scout itself.
+    #[serde(default)]
+    pub auto_scout: bool,
     pub waypoints: Vec<Vec<Pos>>,
     /// Deliveries per tick for the last 10 seconds, for Income.
     pub income_ring: Vec<Cost>,
@@ -454,6 +461,7 @@ impl World {
                 ranks: Ranks::default(),
                 focus: Focus::Balanced,
                 retreat: false,
+                auto_scout: false,
                 waypoints: vec![Vec::new(); Species::ALL.len()],
                 income_ring: vec![[0; 3]; INCOME_TICKS],
                 tally: Tally::default(),
@@ -829,6 +837,10 @@ impl World {
             }
             Command::Retreat { on } => {
                 self.colonies[ci].retreat = *on;
+                Ok(())
+            }
+            Command::AutoScout { on } => {
+                self.colonies[ci].auto_scout = *on;
                 Ok(())
             }
             Command::Focus { focus } => {

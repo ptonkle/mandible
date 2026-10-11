@@ -102,6 +102,10 @@ pub struct MatchSettings {
     pub biome: Biome,
     pub events: bool,
     pub disabled: Vec<Species>,
+    /// Every colony starts with the whole map Explored (not Visible).
+    pub map_revealed: bool,
+    /// Sandbox: human colonies have unlimited resources and start at Tier 3.
+    pub sandbox: bool,
 }
 
 impl Default for MatchSettings {
@@ -117,6 +121,8 @@ impl Default for MatchSettings {
             biome: Biome::Picnic,
             events: true,
             disabled: Vec::new(),
+            map_revealed: false,
+            sandbox: false,
         }
     }
 }
