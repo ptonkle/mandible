@@ -120,18 +120,16 @@ fn saturation_caps_gatherers_per_node() {
         w.spawn_ant(0, Species::Harvester, h);
     }
     w.colonies[0].focus = Focus::Food;
-    run(&mut w, 60);
+    // Everyone chooses on the first tick, before any inventory fills.
+    run(&mut w, 1);
     let mut per = std::collections::BTreeMap::new();
     for a in &w.ants {
         if let Job::Gather(n) = a.job {
             *per.entry(n).or_insert(0) += 1;
         }
     }
-    assert!(per.values().all(|c| *c <= 8), "{per:?}");
-    assert!(
-        per.len() >= 3,
-        "30 gatherers spread over several nodes: {per:?}"
-    );
+    // Only the three home nodes are explored: 3 x 8 gatherers, 6 left idle.
+    assert_eq!(per.values().copied().collect::<Vec<i32>>(), vec![8, 8, 8], "{per:?}");
 }
 
 #[test]
