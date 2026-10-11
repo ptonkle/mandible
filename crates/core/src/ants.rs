@@ -103,6 +103,9 @@ impl World {
         }
         // Waypoint assignment: each species' ants split evenly, by id order.
         let mut ordinal: BTreeMap<(u8, usize), usize> = BTreeMap::new();
+        // Idle Carpenter Ants so far this tick, per colony, for spreading
+        // them round the queens.
+        let mut idle_builders: BTreeMap<u8, usize> = BTreeMap::new();
         let scouts = self.pick_scouts();
 
         for i in 0..self.ants.len() {
@@ -113,7 +116,7 @@ impl World {
             a.cooldown = (a.cooldown - 1).max(0);
             match a.species.stats().role {
                 Role::Gatherer => self.gatherer(&mut a, &mut node_load, &mut res_load),
-                Role::Builder => self.builder(&mut a, &mut bp_load),
+                Role::Builder => self.builder(&mut a, &mut bp_load, &mut idle_builders),
                 _ if scouts[a.colony as usize] == Some(a.id) => self.scout(&mut a),
                 _ => {
                     let k = (a.colony, a.species.index());
@@ -132,13 +135,17 @@ impl World {
         self.bury();
     }
 
-    fn terrain(&self) -> Terrain<'_> {
-        Terrain {
-            w: self.map.w,
-            h: self.map.h,
-            ground: &self.map.ground,
-            wall: &self.wall,
+    /// Each colony's team, indexed by colony, for `Terrain::teams`.
+    pub(crate) fn team_table(&self) -> [u8; 8] {
+        let mut t = [0u8; 8];
+        for (i, slot) in t.iter_mut().enumerate() {
+            *slot = self
+                .colonies
+                .get(i)
+                .map(|c| c.team)
+                .unwrap_or(100 + i as u8);
         }
+        t
     }
 
     fn mode_of(s: Species) -> Mode {
@@ -153,8 +160,15 @@ impl World {
 
     fn standable(&self, a: &Ant, p: Pos) -> bool {
         let (x, y) = p.cell();
-        self.terrain()
-            .standable(x, y, a.colony, World::mode_of(a.species))
+        let teams = self.team_table();
+        let t = Terrain {
+            w: self.map.w,
+            h: self.map.h,
+            ground: &self.map.ground,
+            wall: &self.wall,
+            teams: &teams,
+        };
+        t.standable(x, y, a.colony, World::mode_of(a.species))
     }
 
     /// Moves by at most `speed` toward `to`, sliding along obstacles.
@@ -186,11 +200,13 @@ impl World {
     fn follow(&mut self, a: &mut Ant, key: FieldKey) -> Step {
         let (w, h) = (self.map.w, self.map.h);
         let (cx, cy) = a.pos.cell();
+        let teams = self.team_table();
         let t = Terrain {
             w,
             h,
             ground: &self.map.ground,
             wall: &self.wall,
+            teams: &teams,
         };
         let f = self.nav.field(&t, key);
         let here = f.at(w, cx, cy);
@@ -410,11 +426,13 @@ impl World {
             for (_, id, pos) in cands.into_iter().take(3) {
                 let (x, y) = pos.cell();
                 let key = World::key_for(a, x, y, 1);
+                let teams = self.team_table();
                 let t = Terrain {
                     w: self.map.w,
                     h: self.map.h,
                     ground: &self.map.ground,
                     wall: &self.wall,
+                    teams: &teams,
                 };
                 let (cx, cy) = a.pos.cell();
                 if self.nav.field(&t, key).at(self.map.w, cx, cy) != UNREACHED {
@@ -427,7 +445,12 @@ impl World {
 
     // ---- builders ----
 
-    fn builder(&mut self, a: &mut Ant, bp_load: &mut BTreeMap<Id, usize>) {
+    fn builder(
+        &mut self,
+        a: &mut Ant,
+        bp_load: &mut BTreeMap<Id, usize>,
+        idle: &mut BTreeMap<u8, usize>,
+    ) {
         let st = self.colonies[a.colony as usize].ranks.apply(a.species);
         let bid = match a.job {
             Job::Fetch(b) | Job::Haul(b) | Job::Build(b) => Some(b),
@@ -544,15 +567,53 @@ impl World {
                 if let Some((_, b)) = pick {
                     *bp_load.entry(b).or_insert(0) += 1;
                     a.job = Job::Fetch(b);
-                } else if let Some((key, _, _)) = self.queen_key(a) {
-                    let k = FieldKey {
-                        r: key.r + 2,
-                        ..key
-                    };
-                    self.follow(a, k);
+                } else {
+                    let n = idle.entry(a.colony).or_insert(0);
+                    let k = *n;
+                    *n += 1;
+                    if let Some(key) = self.waiting_spot(a, k) {
+                        self.follow(a, key);
+                    }
                 }
             }
         }
+    }
+
+    /// Where the `k`-th idle Carpenter Ant of a colony waits (TRIAGE row
+    /// 54): idle Carpenter Ants take the queens in turn, so each queen gets
+    /// an even share, and each one at a queen has its own spot on a ring
+    /// round it, so they do not stand in one clump.
+    fn waiting_spot(&self, a: &Ant, k: usize) -> Option<FieldKey> {
+        let queens: Vec<(Pos, i32)> = self.queens(a.colony).map(|q| (q.pos, q.radius())).collect();
+        if queens.is_empty() {
+            return None;
+        }
+        let (qpos, qr) = queens[k % queens.len()];
+        let j = k / queens.len();
+        // Eight spots a ring, spread round the queen; further rings beyond.
+        let ring = (j / 8) as i32;
+        let d = qr / CELL + 3 + ring * 2;
+        let base = [0usize, 32, 16, 48, 8, 40, 24, 56][j % 8] + 4 * (ring as usize % 2);
+        let (qx, qy) = qpos.cell();
+        let teams = self.team_table();
+        let t = Terrain {
+            w: self.map.w,
+            h: self.map.h,
+            ground: &self.map.ground,
+            wall: &self.wall,
+            teams: &teams,
+        };
+        // The first open spot from that angle on round the ring.
+        for step in 0..16 {
+            let ang = (base + step * 4) % 64;
+            let x = qx + d * crate::fixed::cos64(ang) / crate::fixed::TRIG_ONE;
+            let y = qy + d * crate::fixed::sin64(ang) / crate::fixed::TRIG_ONE;
+            if t.standable(x, y, a.colony, Mode::Walk) && self.wall[self.map.idx(x, y)] == NO_WALL {
+                return Some(World::key_for(a, x, y, 1));
+            }
+        }
+        let (x, y) = qpos.cell();
+        Some(World::key_for(a, x, y, qr / CELL + 3))
     }
 
     // ---- combat ants ----
@@ -628,19 +689,52 @@ impl World {
         let st = self.colonies[ci].ranks.apply(a.species);
         let aggro = st.vision * CELL;
 
-        if self.colonies[ci].retreat {
-            a.target = None;
-            if let Some((key, _, _)) = self.queen_key(a) {
-                let k = FieldKey {
+        let retreat = self.colonies[ci].retreat;
+        if retreat {
+            // Home by walking where possible: a retreat never stops to dig
+            // or break a wall unless that is the only way back, and then it
+            // digs (below) instead of standing still.
+            let blocking = match a.target {
+                Some(Target::Dirt(x, y)) => a.pos.dist(Pos::of_cell(x, y)) <= 2 * CELL,
+                Some(Target::Structure(id)) => self.structure(id).is_some_and(|s| {
+                    s.kind == StructureKind::Wall && s.pos.dist(a.pos) <= 2 * CELL
+                }),
+                _ => false,
+            };
+            if !blocking {
+                a.target = None;
+            }
+            if a.target.is_none() {
+                let Some((key, _, _)) = self.queen_key(a) else {
+                    return;
+                };
+                let home = FieldKey {
                     r: key.r + 3,
                     ..key
                 };
-                self.follow(a, k);
+                let walk = FieldKey {
+                    mode: if a.species.flies() {
+                        Mode::Fly
+                    } else {
+                        Mode::Walk
+                    },
+                    ..home
+                };
+                let step = if self.reaches(a, walk) {
+                    self.follow(a, walk)
+                } else {
+                    self.follow(a, home)
+                };
+                if let Step::Blocked(x, y) = step {
+                    a.target = self.blocker(a, x, y);
+                }
+                if a.target.is_none() {
+                    return;
+                }
             }
-            return;
         }
 
-        if st.heal > 0 {
+        if st.heal > 0 && !retreat {
             self.nurse(a, &st);
             return;
         }
@@ -652,7 +746,7 @@ impl World {
                 _ => a.target = None,
             }
         }
-        if a.target.is_none() || (self.tick + a.id as i32) % ticks(5) == 0 {
+        if !retreat && (a.target.is_none() || (self.tick + a.id as i32) % ticks(5) == 0) {
             if let Some(t) = self.find_target(a, aggro) {
                 // Keep digging unless an enemy shows up.
                 let digging = matches!(a.target, Some(Target::Dirt(..)));
@@ -713,14 +807,39 @@ impl World {
             Step::Arrived
         };
         if let Step::Blocked(x, y) = step {
-            if self.map.at(x, y) == Ground::Dirt {
-                a.target = Some(Target::Dirt(x, y));
-            } else if let Some(s) = self.structures.iter().find(|s| {
-                s.kind == StructureKind::Wall && s.complete && s.cells.first() == Some(&(x, y))
-            }) {
-                a.target = Some(Target::Structure(s.id));
-            }
+            a.target = self.blocker(a, x, y);
         }
+    }
+
+    /// What an ant must dig or break to get past (x, y): dirt, or a wall
+    /// that is not its team's.
+    fn blocker(&self, a: &Ant, x: i32, y: i32) -> Option<Target> {
+        if self.map.at(x, y) == Ground::Dirt {
+            return Some(Target::Dirt(x, y));
+        }
+        self.structures
+            .iter()
+            .find(|s| {
+                s.kind == StructureKind::Wall
+                    && s.complete
+                    && !self.allied(s.colony, a.colony)
+                    && s.cells.first() == Some(&(x, y))
+            })
+            .map(|s| Target::Structure(s.id))
+    }
+
+    /// Whether the field for `key` reaches the ant's cell.
+    fn reaches(&mut self, a: &Ant, key: FieldKey) -> bool {
+        let teams = self.team_table();
+        let t = Terrain {
+            w: self.map.w,
+            h: self.map.h,
+            ground: &self.map.ground,
+            wall: &self.wall,
+            teams: &teams,
+        };
+        let (cx, cy) = a.pos.cell();
+        self.nav.field(&t, key).at(self.map.w, cx, cy) != UNREACHED
     }
 
     // ---- Auto-Scout ----
@@ -789,11 +908,13 @@ impl World {
                         y: ch.cy,
                         r: 2,
                     };
+                    let teams = self.team_table();
                     let t = Terrain {
                         w: self.map.w,
                         h: self.map.h,
                         ground: &self.map.ground,
                         wall: &self.wall,
+                        teams: &teams,
                     };
                     if self.nav.field(&t, key).at(self.map.w, cx, cy) != UNREACHED {
                         found = Some(i as u32);

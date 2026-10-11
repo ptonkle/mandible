@@ -25,11 +25,15 @@ fn home(w: &World, seat: usize) -> Pos {
     Pos::of_cell(h.cx, h.cy)
 }
 
-/// An empty arena: both colonies keep only their queens.
+/// An empty arena: both colonies keep only their queens, and Auto-Scout
+/// (on by default) is off, so no ant leaves on its own.
 fn arena(seed: u64) -> World {
     let mut w = world(seed);
     w.ants.clear();
     w.settings.events = false;
+    for c in w.colonies.iter_mut() {
+        c.auto_scout = false;
+    }
     w
 }
 
@@ -1158,4 +1162,345 @@ fn colonies_record_a_sample_every_ten_seconds() {
     assert_eq!(h[0].workers, 8);
     assert_eq!(h[0].army, 2);
     assert!(h[2].gathered.iter().sum::<i32>() >= h[0].gathered.iter().sum::<i32>());
+}
+
+// ---- TRIAGE row 38: Retreat and walls ----
+
+/// Builds a finished wall on every cell between `r0` and `r0 + 2` cells
+/// from `seat`'s home centre where a wall may be placed: a full ring round
+/// the nest, as close as placement allows. With `closed`, every floor
+/// cell of the ring gets a wall, so nothing walks round it.
+fn wall_ring(w: &mut World, owner: u8, seat: usize, r0: i32, closed: bool) -> usize {
+    let h = w.map.home(seat).clone();
+    let n = (w.map.w * w.map.h) as usize;
+    w.explored[owner as usize].set_all(n);
+    let mut cells = Vec::new();
+    for y in h.cy - r0 - 3..=h.cy + r0 + 3 {
+        for x in h.cx - r0 - 3..=h.cx + r0 + 3 {
+            let d2 = (x - h.cx).pow(2) + (y - h.cy).pow(2);
+            if d2 >= r0 * r0
+                && d2 < (r0 + 2).pow(2)
+                && (if closed {
+                    w.map.is_floor(x, y)
+                } else {
+                    w.wall_plan(owner, x, y, x, y).len() == 1
+                })
+            {
+                cells.push((x, y));
+            }
+        }
+    }
+    for &(x, y) in &cells {
+        w.add_structure(
+            owner,
+            StructureKind::Wall,
+            Pos::of_cell(x, y),
+            vec![(x, y)],
+            true,
+        );
+    }
+    cells.len()
+}
+
+/// Spawns `n` combat ants of `colony` in the centre chamber.
+fn army_at_centre(w: &mut World, colony: u8, n: usize) -> Vec<u32> {
+    let c = w.map.chambers[w.map.centre].clone();
+    (0..n)
+        .map(|k| {
+            let sp = [Species::Soldier, Species::Soldier, Species::Turtle][k % 3];
+            let p = Pos::of_cell(c.cx + k as i32 % 5 - 2, c.cy + k as i32 / 5 - 3);
+            put(w, colony, sp, p)
+        })
+        .collect()
+}
+
+fn on_a_wall(w: &World, ids: &[u32]) -> usize {
+    w.ants
+        .iter()
+        .filter(|a| ids.contains(&a.id))
+        .filter(|a| {
+            let (x, y) = a.pos.cell();
+            w.wall[w.map.idx(x, y)] != tool_core::nav::NO_WALL
+        })
+        .count()
+}
+
+fn farthest(w: &World, ids: &[u32], from: Pos) -> i32 {
+    w.ants
+        .iter()
+        .filter(|a| ids.contains(&a.id))
+        .map(|a| a.pos.dist(from) / CELL)
+        .max()
+        .unwrap_or(0)
+}
+
+#[test]
+fn retreating_ants_pass_their_walls_and_never_stop_on_one() {
+    // TRIAGE row 38. The closest a wall may stand to a queen is about 6
+    // cells, and Retreat used to stop ants anywhere within 6.5 cells of the
+    // queen: an army came home and stood on the ring of walls, looking stuck
+    // on it. Own walls are gates; ants pass them and wait inside.
+    let mut w = arena(17);
+    let ring = wall_ring(&mut w, 0, 0, 6, false);
+    assert!(ring > 40, "a ring of {ring} walls");
+    let ids = army_at_centre(&mut w, 0, 30);
+    let h = home(&w, 0);
+    w.apply(0, &Command::Retreat { on: true });
+    run(&mut w, ticks(600));
+    let far = farthest(&w, &ids, h);
+    assert!(far <= 8, "every ant came home ({far} cells out)");
+    assert_eq!(on_a_wall(&w, &ids), 0, "ants standing on a wall");
+    // Idle at the nest (no waypoint) they do not stand on walls either.
+    w.apply(0, &Command::Retreat { on: false });
+    run(&mut w, ticks(200));
+    assert_eq!(on_a_wall(&w, &ids), 0, "idle ants standing on a wall");
+}
+
+#[test]
+fn an_ally_wall_lets_a_retreat_through_and_is_never_attacked() {
+    // In 2v2 a wall is a gate for its whole team: a retreating ally walks
+    // through it rather than standing at it, and no ally breaks it.
+    let s = MatchSettings {
+        format: Format::TwoVTwo,
+        events: false,
+        ..MatchSettings::default()
+    };
+    let mut w = World::new(18, s, &humans(4));
+    w.ants.clear();
+    for c in w.colonies.iter_mut() {
+        c.auto_scout = false;
+    }
+    // Seat 1 walls in its nest. Seat 0 loses its own queen and gets one
+    // inside seat 1's ring, so its retreat must cross the ally walls.
+    let ring = wall_ring(&mut w, 1, 1, 8, true);
+    assert!(ring > 40, "a ring of {ring} walls");
+    w.structures
+        .retain(|s| !(s.colony == 0 && s.kind == StructureKind::Queen));
+    let h1 = w.map.home(1).clone();
+    w.add_structure(
+        0,
+        StructureKind::Queen,
+        Pos::of_cell(h1.cx + 1, h1.cy),
+        vec![],
+        true,
+    );
+    let ids = army_at_centre(&mut w, 0, 12);
+    let walls = |w: &World| -> i32 {
+        w.structures
+            .iter()
+            .filter(|s| s.kind == StructureKind::Wall)
+            .map(|s| s.health)
+            .sum()
+    };
+    let before = walls(&w);
+    w.apply(0, &Command::Retreat { on: true });
+    run(&mut w, ticks(900));
+    let far = farthest(&w, &ids, Pos::of_cell(h1.cx, h1.cy));
+    assert!(
+        far <= 9,
+        "every ant reached the nest inside the ring ({far} cells out)"
+    );
+    assert_eq!(walls(&w), before, "an ally wall was hit");
+}
+
+#[test]
+fn a_retreat_walled_out_by_an_enemy_breaks_through() {
+    // With no way home but through enemy walls, retreating ants break them
+    // instead of standing at them for ever.
+    let mut w = arena(17);
+    wall_ring(&mut w, 1, 0, 8, true);
+    let ids = army_at_centre(&mut w, 0, 12);
+    w.apply(0, &Command::Retreat { on: true });
+    run(&mut w, ticks(1200));
+    let far = farthest(&w, &ids, home(&w, 0));
+    assert!(far <= 8, "every ant came home ({far} cells out)");
+}
+
+// ---- TRIAGE row 54: idle Carpenter Ants ----
+
+#[test]
+fn idle_carpenters_wait_spread_evenly_round_the_queens() {
+    // Six idle Carpenter Ants and two queens: three wait at each queen, each
+    // on its own spot round it, never in one clump.
+    let mut w = arena(10);
+    let c = w.map.chambers[w.map.centre].clone();
+    let q2 = Pos::of_cell(c.cx, c.cy);
+    w.add_structure(0, StructureKind::Queen, q2, vec![], true);
+    let q1 = home(&w, 0);
+    let ids: Vec<u32> = (0..6)
+        .map(|_| w.spawn_ant(0, Species::Carpenter, q1))
+        .collect();
+    run(&mut w, ticks(900));
+    let carps: Vec<Pos> = w
+        .ants
+        .iter()
+        .filter(|a| ids.contains(&a.id))
+        .map(|a| a.pos)
+        .collect();
+    let at = |q: Pos| carps.iter().filter(|p| p.dist(q) <= 8 * CELL).count();
+    assert_eq!((at(q1), at(q2)), (3, 3), "Carpenter Ants per queen");
+    let mut closest = i32::MAX;
+    for (i, a) in carps.iter().enumerate() {
+        for b in &carps[i + 1..] {
+            closest = closest.min(a.dist(*b));
+        }
+    }
+    assert!(
+        closest >= 2 * CELL,
+        "two Carpenter Ants {} tenths of a cell apart",
+        closest * 10 / CELL
+    );
+}
+
+// ---- TRIAGE row 45: Auto-Scout from the start ----
+
+#[test]
+fn auto_scout_is_on_from_the_start_for_every_colony() {
+    let seats = [SeatKind::Human, SeatKind::Ai(Difficulty::Imago)];
+    let mut w = World::new(5, MatchSettings::default(), &seats);
+    assert!(w.colonies.iter().all(|c| c.auto_scout));
+    w.step(&[], &[]);
+    for c in 0..2 {
+        let scout = w.colonies[c].scout.expect("a scout from the first tick");
+        let a = w.ants.iter().find(|a| a.id == scout).unwrap();
+        assert_eq!(a.species, Species::Soldier, "the only combat ants");
+    }
+}
+
+// ---- TRIAGE row 46: queen placement ----
+
+/// Whether a queen at (x, y) has what the rule asks for, worked out here
+/// from the map alone: floor under a disk of radius 3 (footprint 2 plus
+/// room 1), no node within 4.5 cells (2.5 footprint + 1.5 + a half for
+/// the node), and at least `gap` cells from every queen.
+fn plainly_free(w: &World, x: i32, y: i32, gap: i32) -> bool {
+    let floor = (-3..=3).all(|dy: i32| {
+        (-3..=3).all(|dx: i32| dx * dx + dy * dy > 12 || w.map.is_floor(x + dx, y + dy))
+    });
+    let p = Pos::of_cell(x, y);
+    floor
+        && w.nodes.iter().all(|n| n.pos.dist(p) >= 5 * CELL)
+        && w.structures.iter().all(|s| s.pos.dist(p) >= gap * CELL)
+}
+
+fn queen_ok(w: &World, x: i32, y: i32) -> bool {
+    w.check_place(0, StructureKind::Queen, x, y, x, y).is_ok()
+}
+
+#[test]
+fn a_queen_fits_on_chamber_floor_outside_the_planned_circle() {
+    // The old rule asked for a spot inside a chamber's planned circle, but
+    // chamber outlines bulge past it: floor that is plainly chamber was
+    // refused. Every free spot of drawn floor near a chamber now takes one.
+    let mut w = world(4);
+    let n = (w.map.w * w.map.h) as usize;
+    w.explored[0].set_all(n);
+    let mut tried = 0;
+    for c in w.map.chambers.clone() {
+        for y in c.cy - c.r - 5..=c.cy + c.r + 5 {
+            for x in c.cx - c.r - 5..=c.cx + c.r + 5 {
+                let d2 = (x - c.cx).pow(2) + (y - c.cy).pow(2);
+                let outside = d2 > c.r * c.r && w.map.chamber_at(x, y).is_none();
+                if outside && d2 <= (c.r + 4).pow(2) && plainly_free(&w, x, y, 12) {
+                    tried += 1;
+                    assert!(queen_ok(&w, x, y), "refused at {x},{y} by chamber {c:?}");
+                }
+            }
+        }
+    }
+    assert!(tried > 20, "only {tried} spots tried");
+}
+
+#[test]
+fn a_queen_fits_on_open_ground_away_from_chambers() {
+    let s = MatchSettings {
+        map_type: tool_core::settings::MapType::Open,
+        ..MatchSettings::default()
+    };
+    let mut w = World::new(6, s, &humans(2));
+    let n = (w.map.w * w.map.h) as usize;
+    w.explored[0].set_all(n);
+    let mut tried = 0;
+    for y in (4..w.map.h - 4).step_by(3) {
+        for x in (4..w.map.w - 4).step_by(3) {
+            if w.map.chamber_at(x, y).is_none() && plainly_free(&w, x, y, 12) {
+                tried += 1;
+                assert!(queen_ok(&w, x, y), "refused at {x},{y}");
+            }
+        }
+    }
+    assert!(tried > 100, "only {tried} spots tried");
+}
+
+#[test]
+fn queens_need_nine_cells_between_centres_and_ignore_enemy_pickup_reach() {
+    // Two of the old refusals that looked wrong: a queen 10 cells from
+    // another (the old spacing was 14), and a queen beside an enemy brood
+    // cell (the pickup clearance only matters for a colony's own Carpenter
+    // Ants). Still refused: 8 cells from a queen, a node under it, rock in
+    // its room, unexplored ground.
+    let mut w = arena(4);
+    let n = (w.map.w * w.map.h) as usize;
+    w.explored[0].set_all(n);
+    let h = w.map.home(0).clone();
+    // A spot 10 cells from the home queen.
+    let spot = (0..64)
+        .map(|a: usize| {
+            (
+                h.cx + 11 * tool_core::fixed::cos64(a) / 1024,
+                h.cy + 11 * tool_core::fixed::sin64(a) / 1024,
+            )
+        })
+        .find(|&(x, y)| {
+            let d = Pos::of_cell(x, y).dist(home(&w, 0));
+            plainly_free(&w, x, y, 9) && (10 * CELL..11 * CELL).contains(&d)
+        })
+        .expect("a free spot 10 cells out");
+    assert!(queen_ok(&w, spot.0, spot.1), "10 cells from the queen");
+    // An enemy brood cell 5 cells away does not matter.
+    let (x, y) = spot;
+    let dir = (x - h.cx, y - h.cy);
+    let len = Pos::of_cell(0, 0).dist(Pos::of_cell(dir.0, dir.1));
+    let at = Pos::of_cell(x, y);
+    let side = Pos::new(
+        at.x - (5 * CELL + CELL / 4) * dir.1 * CELL / len,
+        at.y + (5 * CELL + CELL / 4) * dir.0 * CELL / len,
+    );
+    w.add_structure(1, StructureKind::BroodCell, side, vec![], true);
+    let gap = side.dist(at) / CELL;
+    assert_eq!(gap, 5, "the enemy brood cell is 5 cells away");
+    assert!(queen_ok(&w, x, y), "beside an enemy brood cell");
+    // Still refused.
+    let near = (h.cx + 8 * dir.0 / 10, h.cy + 8 * dir.1 / 10);
+    assert!(!queen_ok(&w, near.0, near.1), "8 cells from a queen");
+    let node = w.nodes.iter().find(|n| !n.cache).unwrap().pos.cell();
+    assert!(!queen_ok(&w, node.0, node.1), "on a node");
+    w.explored[0] = tool_core::fog::Bits::new(n);
+    assert!(!queen_ok(&w, x, y), "unexplored");
+}
+
+#[test]
+fn a_queen_needs_a_ring_of_open_ground_round_its_footprint() {
+    let mut w = arena(4);
+    let n = (w.map.w * w.map.h) as usize;
+    w.explored[0].set_all(n);
+    // A free spot whose room ring meets rock: right beside a rock face.
+    let mut found = None;
+    'scan: for y in 4..w.map.h - 4 {
+        for x in 4..w.map.w - 4 {
+            let p = Pos::of_cell(x, y);
+            let foot = (-2..=2).all(|dy: i32| {
+                (-2..=2).all(|dx: i32| dx * dx + dy * dy > 6 || w.map.is_floor(x + dx, y + dy))
+            });
+            let rock_in_ring = !w.map.is_floor(x + 3, y);
+            let clear = w.nodes.iter().all(|n| n.pos.dist(p) >= 5 * CELL)
+                && w.structures.iter().all(|s| s.pos.dist(p) >= 12 * CELL);
+            if foot && rock_in_ring && clear {
+                found = Some((x, y));
+                break 'scan;
+            }
+        }
+    }
+    let (x, y) = found.expect("a spot against rock");
+    assert!(!queen_ok(&w, x, y), "a queen pressed against rock");
 }
