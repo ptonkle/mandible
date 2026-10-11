@@ -42,26 +42,26 @@ One row per concrete change. Say what you did, what you expected, and what happe
 | 34 | Looked at the tier badges | A tier marker that doesn't look like a hotkey | Boxed digits looked like keyboard keys | Plain text "T1", "T2", "T3" (the person chose T over E), no box. *Done: glossary row T1–T3; test updated.* | done 2026-10-11 |
 | 35 | — | — | — | A Pause button in single player. *Done: Pause in every match that is not online (top bar button and hotkey P, rebindable), and opening the Menu (Esc) pauses too. Time Scale stays Sandbox- and spectating-only. Break-once: the Menu not pausing → `the open Menu pauses too: left: 20 right: 0`.* | done 2026-10-11 |
 | 36 | Watched Carpenter Ants build | They carry, build and move on | They got stuck on walls and unfinished structures, and stood at blueprints waiting for the last materials | Building works per load. *Done: a Carpenter Ant delivers its Leaves, then applies them: the build bar grows a little each tick, up to the work those delivered Leaves cover (`Structure::covered_work`); then it fetches more. Nobody waits for the whole cost, and Carpenter Ants only pick blueprints with something to fetch or apply. Probe on 4 seeds with walls, brood cells and a hatchery: no Carpenter Ant stuck, everything finished. Also, ants never step diagonally past a closed corner and recentre if wedged. Test `carpenters_apply_each_load_as_it_arrives` (one Carpenter Ant: 50 Leaves applied to 166/200 work, then the last 10). Break-once: applying past the delivered Leaves → `work 168 ran ahead of the Leaves delivered (166 covered)`. Ladder unchanged: 10/10 and 10/10, medians 5:45 and 4:48. Earlier reports of stuck ants likely came from the old "wait for everything" rule and the reach bug (row 12).* | done 2026-10-11 |
-| 37 | Online Multiplayer | A name field, and a Copy button for the Room Code | — | (see Expected) | open |
+| 37 | Online Multiplayer | A name field, and a Copy button for the Room Code | — | (see Expected) | done 2026-10-11 |
 | 38 | Retreated with walls built | Ants come home | Retreating ants seem to get stuck on the player's own walls | (see Expected) | open |
-| 39 | Finished a match | An after-match graph screen like Age of Empires II (resources over time and other numbers) | Only a short table | (see Expected) | open |
-| 40 | Finished a match | A Rematch button | — | (see Expected) | open |
-| 41 | Played online with more than 2 people | A lobby that works for up to 4 humans, inspired by Civilization's lobby (a player list with team, colour, difficulty for AI seats, a ready state, and the host's settings) | More than 2 humans does not work; AI difficulty cannot be chosen for opponents in 2v2 or Free-for-all | (see Expected) | open |
-| 42 | Looked at resource nodes | Saturation shown over each node (for example 5/8) | — | (see Expected) | open |
-| 43 | Left and rejoined an online game | Status shows the real state | Status stays on "Connecting" | (see Expected) | open |
-| 44 | Chose a Biome | More choices | Only Picnic and Flower Field | (see Expected) | open |
+| 39 | Finished a match | An after-match graph screen like Age of Empires II (resources over time and other numbers) | Only a short table | (see Expected) | done 2026-10-11 |
+| 40 | Finished a match | A Rematch button | — | (see Expected) | done 2026-10-11 |
+| 41 | Played online with more than 2 people | A lobby that works for up to 4 humans, inspired by Civilization's lobby (a player list with team, colour, difficulty for AI seats, a ready state, and the host's settings) | More than 2 humans does not work; AI difficulty cannot be chosen for opponents in 2v2 or Free-for-all | (see Expected) | done 2026-10-11 |
+| 42 | Looked at resource nodes | Saturation shown over each node (for example 5/8) | — | (see Expected) | done 2026-10-11 |
+| 43 | Left and rejoined an online game | Status shows the real state | Status stays on "Connecting" | (see Expected) | done 2026-10-11 |
+| 44 | Chose a Biome | More choices | Only Picnic and Flower Field | (see Expected) | done 2026-10-11 |
 | 45 | Started a match | Auto-Scout on from the start | Off until switched on | (see Expected) | open |
 | 46 | Placed a queen | Placement where it looks allowed | It often refuses spots that look fine; finicky | (see Expected) | open |
 | 47 | Played a long match | Enough resources to build a 300-pop army | There are not enough resources on the map | (see Expected) | open |
-| 48 | Looked at the top bar | A count of the whole army right now, apart from the queue | — | (see Expected) | open |
-| 49 | Joined an online lobby | Joined players can Ready Up | — | (see Expected) | open |
+| 48 | Looked at the top bar | A count of the whole army right now, apart from the queue | — | (see Expected) | done 2026-10-11 |
+| 49 | Joined an online lobby | Joined players can Ready Up | — | (see Expected) | done 2026-10-11 |
 | 50 | Played several maps | Maps that look less symmetric but stay balanced | Maps are obviously mirrored | (see Expected) | open |
 | 51 | Looked at chambers | Every chamber has every resource type *(the request was cut off at "every chamber should have every"; the agent reads it as Food, Nectar and Leaves: to confirm)* | — | (see Expected) | open |
 | 52 | Played the early game | Less Nectar early | Too much Nectar early | (see Expected) | open |
-| 53 | Queued upgrades | Upgrades easy to tell apart in the queue | They look alike | (see Expected) | open |
+| 53 | Queued upgrades | Upgrades easy to tell apart in the queue | They look alike | (see Expected) | done 2026-10-11 |
 | 54 | Had idle Carpenter Ants | They wait near the queens, spread evenly between them | — | (see Expected) | open |
-| 55 | Wanted to set an All Ants waypoint | A dedicated hotkey, without opening the Waypoints tab: try Tab | — | (see Expected) | open |
-| 56 | Used Edge Pan | A setting for its speed | — | (see Expected) | open |
-| 57 | Opened Keybinds | Tab labels as they are in the game (Ants, Build, Waypoints, Upgrades, Colony) | "Grid Tab 1" … "Grid Tab 5" | (see Expected) | open |
-| 58 | Played on Picnic | More little props on the blanket: picnic basket, cookies, and more | — | (see Expected) | open |
+| 55 | Wanted to set an All Ants waypoint | A dedicated hotkey, without opening the Waypoints tab: try Tab | — | (see Expected) | done 2026-10-11 |
+| 56 | Used Edge Pan | A setting for its speed | — | (see Expected) | done 2026-10-11 |
+| 57 | Opened Keybinds | Tab labels as they are in the game (Ants, Build, Waypoints, Upgrades, Colony) | "Grid Tab 1" … "Grid Tab 5" | (see Expected) | done 2026-10-11 |
+| 58 | Played on Picnic | More little props on the blanket: picnic basket, cookies, and more | — | (see Expected) | done 2026-10-11 |
 | 59 | Played | Sounds, starting with a warning when training past the room in housing | No sound at all | *Done (foundation): `crates/core/src/sound.rs` synthesises each sound (integer synthesiser to a WAV file, made by the core); the page decodes and plays it with Web Audio, and holds no numbers. Sounds: Warning (two low beeps: training with no housing room, and every refusal notice such as Not Enough, Pop Cap or Placement Blocked), Complete (upgrade or Evolve finished), Alert (Queen Lost), Event (Windfall, Hill), Victory, Defeat, Click (Volume changed). Each has a cooldown (Warning 1.5 s). Volume (Off, Low, Normal, High) in Player Settings. Tests: every cue is a valid WAV, audible, never clips, silent at Off; training past housing plays the Warning once (break-once: no cue → `left: Null right: ["warning"]`); a browser check plays it in all three engines. Ideas for later: an Alert when our ants or structures come under attack, softer UI clicks, ambient sound per biome.* | done 2026-10-11 |
