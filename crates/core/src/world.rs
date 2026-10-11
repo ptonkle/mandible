@@ -35,7 +35,10 @@ pub enum Focus {
 impl Focus {
     pub fn weights(self) -> [i32; 3] {
         match self {
-            Focus::Balanced => [2, 1, 1],
+            // Food 3 : Nectar 1 : Leaves 2. Food pays for nearly everything
+            // and Leaves build; Nectar is wanted only from Tier 2 (TRIAGE
+            // row 52).
+            Focus::Balanced => [3, 1, 2],
             Focus::Food => [3, 1, 1],
             Focus::Nectar => [1, 3, 1],
             Focus::Leaves => [1, 1, 3],
@@ -516,11 +519,13 @@ impl Refusal {
     }
 }
 
+/// Starting Resources. Little Nectar: it is a mid-game resource (TRIAGE
+/// row 52).
 fn starting_stock(level: crate::settings::Level) -> Cost {
     match level {
-        crate::settings::Level::Low => [150, 50, 100],
-        crate::settings::Level::Normal => [300, 100, 200],
-        crate::settings::Level::High => [600, 250, 400],
+        crate::settings::Level::Low => [150, 25, 100],
+        crate::settings::Level::Normal => [300, 50, 200],
+        crate::settings::Level::High => [600, 150, 400],
     }
 }
 

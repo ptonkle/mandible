@@ -1098,7 +1098,7 @@ fn sandbox_gives_humans_tier_three_and_unlimited_resources() {
     assert_eq!(w.colonies[0].tier, 3);
     assert_eq!(w.colonies[0].stock, [SANDBOX_STOCK; 3]);
     assert_eq!(w.colonies[1].tier, 1);
-    assert_eq!(w.colonies[1].stock, [300, 100, 200]);
+    assert_eq!(w.colonies[1].stock, [300, 50, 200]);
     w.step(
         &[(
             0,
@@ -1503,4 +1503,47 @@ fn a_queen_needs_a_ring_of_open_ground_round_its_footprint() {
     }
     let (x, y) = found.expect("a spot against rock");
     assert!(!queen_ok(&w, x, y), "a queen pressed against rock");
+}
+
+#[test]
+fn an_enemy_behind_rock_does_not_hold_an_ant_against_it() {
+    // An ant used to take any enemy in reach as its target and walk at it
+    // in a straight line, even through rock: it pressed against the rock
+    // for good (seen as ants stuck on walls, and in SECOND-ORDER row 42 as
+    // an army never found). An enemy it cannot walk straight to is left
+    // alone; the ant goes on to its waypoint.
+    let mut w = arena(17);
+    let h = w.map.home(0).clone();
+    // A rock wall across the home chamber, 3 cells east of the middle.
+    for y in h.cy - 12..=h.cy + 12 {
+        let i = w.map.idx(h.cx + 3, y);
+        w.map.ground[i] = tool_core::map::Ground::Rock;
+    }
+    w.nav.invalidate();
+    w.add_structure(
+        1,
+        StructureKind::BroodCell,
+        Pos::of_cell(h.cx + 6, h.cy),
+        vec![],
+        true,
+    );
+    let id = put(&mut w, 0, Species::Soldier, Pos::of_cell(h.cx + 1, h.cy));
+    let (wx, wy) = (h.cx - 8, h.cy + 6);
+    w.apply(
+        0,
+        &Command::SetWaypoint {
+            species: Some(Species::Soldier),
+            x: wx,
+            y: wy,
+            add: false,
+        },
+    );
+    run(&mut w, ticks(100));
+    let a = w.ants.iter().find(|a| a.id == id).unwrap();
+    assert!(
+        a.pos.dist(Pos::of_cell(wx, wy)) <= 4 * CELL,
+        "the Soldier Ant stayed at {:?}, target {:?}",
+        a.pos.cell(),
+        a.target
+    );
 }

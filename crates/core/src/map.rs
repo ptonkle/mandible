@@ -2,7 +2,10 @@
 //!
 //! Fairness comes from symmetry. The generator lays out one sector of the map
 //! (chambers, tunnels, dirt and nodes), then copies it by exact grid rotation:
-//! 180° for two seats, 90° for four. Every seat therefore gets the same map.
+//! 180° for two seats, 90° for four. Every seat therefore gets the same
+//! layout. Then each sector is decorated on its own, so the map does not look
+//! mirrored, and the result is kept only if the seats' walking distances stay
+//! within a few percent (see `decorate`).
 
 use serde::{Deserialize, Serialize};
 
@@ -226,10 +229,12 @@ struct ChamberPlan {
 
 /// Generates the map for a seed and settings.
 pub fn generate(seed: u64, settings: &MatchSettings) -> Map {
-    match settings.map_type {
+    let mut map = match settings.map_type {
         MapType::Tunnels => generate_tunnels(seed, settings),
         MapType::Open | MapType::Maze => generate_open(seed, settings, true),
-    }
+    };
+    let _ = decorate(&mut map, seed, settings.tunnel_width, settings.map_type);
+    map
 }
 
 /// Where seat 0's home chamber goes.
@@ -252,16 +257,29 @@ fn spot_at(cx: i32, cy: i32, d: i32, a: usize) -> Pos {
     )
 }
 
+/// Node sizes before Resource Density, in whole resources (TRIAGE rows 47,
+/// 51 and 52). The home chamber keeps its Food and Leaves; its Flower is
+/// smaller, so Nectar is something to expand for by the middle of a match.
+pub const HOME_AMOUNTS: [i32; 3] = [3600, 1000, 2200];
+/// The home chamber's second, smaller Crumb Pile.
+pub const HOME_SECOND_FOOD: i32 = 2400;
+/// Every other chamber has one node of each resource, its size drawn from
+/// these ranges (one draw per chamber, so its rotations match).
+pub const CHAMBER_AMOUNTS: [(i32, i32); 3] = [(2200, 2800), (1300, 1700), (1100, 1500)];
+/// The centre chamber's nodes, for each seat, by seat count (2, 4).
+pub const CENTRE_AMOUNTS: [i32; 2] = [2500, 1500];
+/// A cache behind dirt.
+pub const CACHE_AMOUNT: i32 = 1000;
+
 /// The home chamber's nodes: one of each resource and a second Crumb Pile.
 fn home_nodes(rng: &mut Rng, home: &ChamberPlan, density: i32, out: &mut Vec<NodeSpot>) {
     let a0 = rng.range(0, 63) as usize;
-    let home_amounts = [3600, 1800, 2200];
     let d = home.r * 6 / 10;
     for (k, res) in Resource::ALL.into_iter().enumerate() {
         out.push(NodeSpot {
             pos: spot_at(home.cx, home.cy, d, (a0 + k * 21) % 64),
             resource: res,
-            amount: home_amounts[k] * density / 100,
+            amount: HOME_AMOUNTS[k] * density / 100,
             cache: false,
         });
     }
@@ -270,29 +288,23 @@ fn home_nodes(rng: &mut Rng, home: &ChamberPlan, density: i32, out: &mut Vec<Nod
     out.push(NodeSpot {
         pos: spot_at(home.cx, home.cy, d, (a0 + 53) % 64),
         resource: Resource::Food,
-        amount: 2400 * density / 100,
+        amount: HOME_SECOND_FOOD * density / 100,
         cache: false,
     });
 }
 
-/// One or two random nodes near the middle of an ordinary chamber.
+/// An ordinary chamber's nodes: one of each resource (TRIAGE row 51), a
+/// third of a turn apart, about halfway out, so a queen still fits in the
+/// middle.
 fn chamber_nodes(rng: &mut Rng, c: &ChamberPlan, density: i32, out: &mut Vec<NodeSpot>) {
-    let count = if rng.chance(density as u32 / 2) { 2 } else { 1 };
-    for _ in 0..count {
-        let roll = rng.below(100);
-        let res = if roll < 45 {
-            Resource::Food
-        } else if roll < 75 {
-            Resource::Nectar
-        } else {
-            Resource::Leaves
-        };
-        let a = rng.range(0, 63) as usize;
-        let d = rng.range(0, c.r / 2);
+    let a0 = rng.range(0, 63) as usize;
+    let d = (c.r * 55 / 100).clamp(4, 6);
+    for (k, res) in Resource::ALL.into_iter().enumerate() {
+        let (lo, hi) = CHAMBER_AMOUNTS[k];
         out.push(NodeSpot {
-            pos: spot_at(c.cx, c.cy, d, a),
+            pos: spot_at(c.cx, c.cy, d, (a0 + k * 21) % 64),
             resource: res,
-            amount: rng.range(1400, 2000) * density / 100,
+            amount: rng.range(lo, hi) * density / 100,
             cache: false,
         });
     }
@@ -303,9 +315,9 @@ fn centre_nodes(w: i32, h: i32, seats: usize, base_r: i32, density: i32, out: &m
     let centre = Pos::new(w * CELL / 2, h * CELL / 2);
     for (k, res) in Resource::ALL.into_iter().enumerate() {
         let (a, amount) = if seats == 2 {
-            (k * 21 + 5, 1500)
+            (k * 21 + 5, CENTRE_AMOUNTS[0])
         } else {
-            (k * 16 + 8, 900)
+            (k * 16 + 8, CENTRE_AMOUNTS[1])
         };
         let d = (base_r / 2) * CELL;
         let p = Pos::new(
@@ -607,7 +619,7 @@ fn generate_tunnels(seed: u64, settings: &MatchSettings) -> Map {
         rep_nodes.push(NodeSpot {
             pos: Pos::of_cell(ax, ay),
             resource: res,
-            amount: 700 * density / 100,
+            amount: CACHE_AMOUNT * density / 100,
             cache: true,
         });
     }
@@ -969,7 +981,7 @@ fn generate_open(seed: u64, settings: &MatchSettings, rescue: bool) -> Map {
         rep_nodes.push(NodeSpot {
             pos: Pos::of_cell(x, y),
             resource: Resource::ALL[rng.below(3) as usize],
-            amount: 700 * density / 100,
+            amount: CACHE_AMOUNT * density / 100,
             cache: true,
         });
     }
@@ -1032,6 +1044,9 @@ fn generate_open(seed: u64, settings: &MatchSettings, rescue: bool) -> Map {
         connect_homes(&mut map, tw);
     }
     drop_specks(&mut map, 12);
+    // A dropped speck can leave floor in a gap narrower than the setting;
+    // open again (this only ever trims those cells).
+    open_to_width(&mut map, tw);
     seal_unreachable(&mut map);
     map
 }
@@ -1553,33 +1568,86 @@ fn connect_homes(map: &mut Map, width: i32) {
 /// that lie in a fully open disk of radius `(width - 2) / 2`, so no passage,
 /// at any angle, is narrower than the Tunnel Width setting allows.
 fn open_to_width(map: &mut Map, width: i32) {
+    open_ground(&mut map.ground, map.w, map.h, width);
+}
+
+fn open_ground(ground: &mut [Ground], w: i32, h: i32, width: i32) {
     let r = (width - 2) / 2;
-    let offsets = disk_offsets(r);
-    let (w, h) = (map.w, map.h);
-    let open = |x: i32, y: i32, g: &[Ground]| -> bool {
-        x >= 0 && y >= 0 && x < w && y < h && g[(y * w + x) as usize] != Ground::Rock
-    };
-    let mut keep = vec![false; map.ground.len()];
-    for y in 0..h {
-        for x in 0..w {
-            if !open(x, y, &map.ground) {
-                continue;
-            }
-            if offsets
-                .iter()
-                .all(|(dx, dy)| open(x + dx, y + dy, &map.ground))
-            {
-                for (dx, dy) in &offsets {
-                    keep[((y + dy) * w + x + dx) as usize] = true;
-                }
-            }
-        }
-    }
-    for (i, g) in map.ground.iter_mut().enumerate() {
+    let open: Vec<bool> = ground.iter().map(|g| *g != Ground::Rock).collect();
+    let full = disk_all(&open, w, h, r);
+    let keep = disk_any(&full, w, h, r);
+    for (i, g) in ground.iter_mut().enumerate() {
         if !keep[i] {
             *g = Ground::Rock;
         }
     }
+}
+
+/// Half-widths of `disk_offsets(r)`, row by row from `-r` to `r`.
+fn disk_rows(r: i32) -> Vec<i32> {
+    (-r..=r)
+        .map(|dy| {
+            (0..=r)
+                .rev()
+                .find(|dx| dx * dx + dy * dy <= r * r + r)
+                .unwrap_or(0)
+        })
+        .collect()
+}
+
+/// Running counts of `v` along each row: `out[y * (w + 1) + x]` counts
+/// the cells before x.
+fn row_sums(v: &[bool], w: i32, h: i32) -> Vec<u32> {
+    let mut out = vec![0u32; ((w + 1) * h) as usize];
+    for y in 0..h {
+        for x in 0..w {
+            let i = (y * (w + 1) + x) as usize;
+            out[i + 1] = out[i] + v[(y * w + x) as usize] as u32;
+        }
+    }
+    out
+}
+
+/// For every cell, whether every cell of `disk_offsets(r)` round it is set
+/// in `v` (cells off the map count as unset).
+fn disk_all(v: &[bool], w: i32, h: i32, r: i32) -> Vec<bool> {
+    let rows = disk_rows(r);
+    let sums = row_sums(v, w, h);
+    let mut out = vec![false; v.len()];
+    for y in 0..h {
+        for x in 0..w {
+            out[(y * w + x) as usize] = rows.iter().enumerate().all(|(k, &hw)| {
+                let yy = y + k as i32 - r;
+                let (x0, x1) = (x - hw, x + hw);
+                yy >= 0 && yy < h && x0 >= 0 && x1 < w && {
+                    let base = (yy * (w + 1)) as usize;
+                    sums[base + x1 as usize + 1] - sums[base + x0 as usize] == (x1 - x0 + 1) as u32
+                }
+            });
+        }
+    }
+    out
+}
+
+/// For every cell, whether any cell of `disk_offsets(r)` round it is set
+/// in `v`.
+fn disk_any(v: &[bool], w: i32, h: i32, r: i32) -> Vec<bool> {
+    let rows = disk_rows(r);
+    let sums = row_sums(v, w, h);
+    let mut out = vec![false; v.len()];
+    for y in 0..h {
+        for x in 0..w {
+            out[(y * w + x) as usize] = rows.iter().enumerate().any(|(k, &hw)| {
+                let yy = y + k as i32 - r;
+                let (x0, x1) = ((x - hw).max(0), (x + hw).min(w - 1));
+                yy >= 0 && yy < h && x0 <= x1 && {
+                    let base = (yy * (w + 1)) as usize;
+                    sums[base + x1 as usize + 1] > sums[base + x0 as usize]
+                }
+            });
+        }
+    }
+    out
 }
 
 /// Cell offsets within radius `r` of the origin.
@@ -1593,6 +1661,542 @@ pub fn disk_offsets(r: i32) -> Vec<(i32, i32)> {
         }
     }
     v
+}
+
+// ---- Per-sector decoration (TRIAGE row 50) ----
+//
+// The layout that decides a match is laid out once and rotated, so it is
+// fair by construction: chambers, the home chamber's shape and nodes, every
+// other node, the tunnels between chambers, dirt and caches. Then each
+// sector is decorated on its own, from its own random stream, so the map no
+// longer looks like copies of one piece: chamber and tunnel outlines bulge
+// into the rock here and there, and rock bumps and specks stand out of the
+// floor. Decoration never touches the home chambers, the centre chamber,
+// the ground round any node or chamber centre, or any dirt, and it never
+// makes a passage narrower than the Tunnel Width. The decorated map is kept
+// only if every chamber can still be walked to and the seats' walking
+// distances (`seat_distances`) stay within `FAIR_PERCENT` of each other;
+// otherwise the generator tries other decorations, and in the end keeps
+// the plain rotated map.
+
+/// How far the seats' walking distances may differ, in percent of the
+/// shortest, for a decorated map to be kept.
+pub const FAIR_PERCENT: i64 = 4;
+
+/// Walking distances (10 a straight step, 14 a diagonal one, no cutting
+/// past rock or dirt corners) over floor from (x, y) to every cell;
+/// `u32::MAX` where it cannot be walked to.
+pub fn walk_distances(map: &Map, x: i32, y: i32) -> Vec<u32> {
+    let (w, h) = (map.w, map.h);
+    let mut dist = vec![u32::MAX; map.ground.len()];
+    if !map.is_floor(x, y) {
+        return dist;
+    }
+    // Dial's algorithm: steps cost 10 or 14, so a ring of 15 buckets by
+    // distance holds every cell still to settle.
+    let mut buckets: Vec<Vec<u32>> = vec![Vec::new(); 15];
+    let start = map.idx(x, y);
+    dist[start] = 0;
+    buckets[0].push(start as u32);
+    let mut pending = 1usize;
+    let mut d = 0u32;
+    while pending > 0 {
+        let slot = (d % 15) as usize;
+        while let Some(i) = buckets[slot].pop() {
+            pending -= 1;
+            let i = i as usize;
+            if dist[i] != d {
+                continue;
+            }
+            let (cx, cy) = (i as i32 % w, i as i32 / w);
+            for (dx, dy, c) in [
+                (1, 0, 10),
+                (-1, 0, 10),
+                (0, 1, 10),
+                (0, -1, 10),
+                (1, 1, 14),
+                (1, -1, 14),
+                (-1, 1, 14),
+                (-1, -1, 14),
+            ] {
+                let (nx, ny) = (cx + dx, cy + dy);
+                if nx < 0 || ny < 0 || nx >= w || ny >= h || !map.is_floor(nx, ny) {
+                    continue;
+                }
+                if dx != 0 && dy != 0 && !(map.is_floor(cx + dx, cy) && map.is_floor(cx, cy + dy)) {
+                    continue;
+                }
+                let ni = (ny * w + nx) as usize;
+                if d + c < dist[ni] {
+                    dist[ni] = d + c;
+                    buckets[((d + c) % 15) as usize].push(ni as u32);
+                    pending += 1;
+                }
+            }
+        }
+        d += 1;
+    }
+    dist
+}
+
+/// For each seat, the walking distances that decide fairness: home to the
+/// centre; home to every other home, in seat order after its own (so the
+/// same column is the same neighbour under rotation); home to its three
+/// nearest ordinary chambers, nearest first. `u32::MAX` if one cannot be
+/// walked to.
+pub fn seat_distances(map: &Map) -> Vec<Vec<u32>> {
+    (0..map.seats)
+        .map(|s| {
+            let h = map.home(s);
+            let d = walk_distances(map, h.cx, h.cy);
+            let at = |c: &Chamber| d[map.idx(c.cx, c.cy)];
+            let mut v = vec![at(&map.chambers[map.centre])];
+            for k in 1..map.seats {
+                v.push(at(map.home((s + k) % map.seats)));
+            }
+            let mut near: Vec<u32> = map
+                .chambers
+                .iter()
+                .enumerate()
+                .filter(|(i, c)| c.home.is_none() && *i != map.centre)
+                .map(|(_, c)| at(c))
+                .collect();
+            near.sort();
+            near.truncate(3);
+            v.extend(near);
+            v
+        })
+        .collect()
+}
+
+/// Whether every column of `seat_distances` is within `percent` of its
+/// shortest, with everything reachable.
+pub fn distances_fair(d: &[Vec<u32>], percent: i64) -> bool {
+    let cols = d.iter().map(|v| v.len()).min().unwrap_or(0);
+    (0..cols).all(|k| {
+        let lo = d.iter().map(|v| v[k]).min().unwrap_or(0) as i64;
+        let hi = d.iter().map(|v| v[k]).max().unwrap_or(0) as i64;
+        hi != u32::MAX as i64 && hi * 100 <= lo * (100 + percent)
+    })
+}
+
+/// How much decoration a sector gets, per Map Type.
+struct Decor {
+    bulges: usize,
+    bumps: usize,
+    specks: usize,
+}
+
+fn decor_for(map_type: MapType) -> Decor {
+    match map_type {
+        MapType::Tunnels => Decor {
+            bulges: 10,
+            bumps: 12,
+            specks: 3,
+        },
+        MapType::Open => Decor {
+            bulges: 5,
+            bumps: 12,
+            specks: 8,
+        },
+        MapType::Maze => Decor {
+            bulges: 3,
+            bumps: 10,
+            specks: 4,
+        },
+    }
+}
+
+/// Decorates every sector on its own (see above).
+/// Returns the attempt kept, or `None` for the plain rotated map.
+fn decorate(map: &mut Map, seed: u64, tw: i32, map_type: MapType) -> Option<u64> {
+    let base = map.ground.clone();
+    let keep = keep_mask(map);
+    let decor = decor_for(map_type);
+    let reach_all = |m: &Map| {
+        let h0 = m.home(0);
+        let reach = flood(m, h0.cx, h0.cy, false);
+        m.chambers.iter().all(|c| reach[m.idx(c.cx, c.cy)])
+    };
+    for attempt in 0..4u64 {
+        let mut g = base.clone();
+        let rngs = |pass: u64| -> Vec<Rng> {
+            (0..map.seats as u64)
+                .map(|t| Rng::new(seed ^ 0x6465_636F_0000 ^ (t + 1) << 24 ^ attempt << 12 ^ pass))
+                .collect()
+        };
+        // Bulges first (floor only grows), then trim any sliver narrower
+        // than the setting; then rock bumps and specks, each checked.
+        // Each attempt after the first decorates a little less.
+        let part = |n: usize| n * (4 - attempt as usize) / 4;
+        let mut r1 = rngs(1);
+        for (t, rng) in r1.iter_mut().enumerate() {
+            for _ in 0..part(decor.bulges) {
+                bulge(map, &mut g, &keep, rng, t, tw);
+            }
+        }
+        open_ground(&mut g, map.w, map.h, tw);
+        let mut width = Width::new(map, &g, tw);
+        let mut r2 = rngs(2);
+        for (t, rng) in r2.iter_mut().enumerate() {
+            for _ in 0..part(decor.bumps) {
+                bump(map, &mut g, &mut width, &keep, rng, t, tw);
+            }
+            for _ in 0..part(decor.specks) {
+                speck(map, &mut g, &mut width, &keep, rng, t, tw);
+            }
+        }
+        let mut trial = Map {
+            ground: g,
+            ..map.clone()
+        };
+        if !reach_all(&trial) {
+            continue;
+        }
+        seal_unreachable(&mut trial);
+        if trial.nodes.len() == map.nodes.len()
+            && distances_fair(&seat_distances(&trial), FAIR_PERCENT)
+        {
+            *map = trial;
+            return Some(attempt);
+        }
+    }
+    None
+}
+
+/// Cells decoration leaves alone: the map's outer ring, the home chambers
+/// and the centre chamber with a margin, the ground round every chamber
+/// centre and node, and dirt with a margin.
+fn keep_mask(map: &Map) -> Vec<bool> {
+    let (w, h) = (map.w, map.h);
+    let mut keep = vec![false; map.ground.len()];
+    let mut mark = |cx: i32, cy: i32, r: i32| {
+        for (dx, dy) in disk_offsets(r) {
+            let (x, y) = (cx + dx, cy + dy);
+            if map.inside(x, y) {
+                keep[(y * w + x) as usize] = true;
+            }
+        }
+    };
+    for (i, c) in map.chambers.iter().enumerate() {
+        let r = if c.home.is_some() || i == map.centre {
+            c.r + c.r / 3 + 4
+        } else {
+            4
+        };
+        mark(c.cx, c.cy, r);
+    }
+    for n in &map.nodes {
+        let (x, y) = n.pos.cell();
+        mark(x, y, 5);
+    }
+    for y in 0..h {
+        for x in 0..w {
+            if map.at(x, y) == Ground::Dirt {
+                mark(x, y, 3);
+            }
+        }
+    }
+    for y in 0..h {
+        for x in 0..w {
+            if x < 2 || y < 2 || x >= w - 2 || y >= h - 2 {
+                keep[(y * w + x) as usize] = true;
+            }
+        }
+    }
+    keep
+}
+
+/// A random cell of sector `t`: drawn in sector 0, then rotated.
+fn sector_cell(map: &Map, rng: &mut Rng, t: usize) -> (i32, i32) {
+    let (sx1, sy1) = if map.seats == 2 {
+        (map.w / 2, map.h)
+    } else {
+        (map.w / 2, map.h / 2)
+    };
+    let x = rng.range(2, sx1 - 1);
+    let y = rng.range(2, sy1 - 1);
+    rotate(map.w, map.h, map.seats, t, x, y)
+}
+
+fn g_at(map: &Map, g: &[Ground], x: i32, y: i32) -> Ground {
+    if map.inside(x, y) {
+        g[map.idx(x, y)]
+    } else {
+        Ground::Rock
+    }
+}
+
+/// A floor cell of sector `t` beside rock, and the way into the rock from
+/// it (the sum of the offsets to rock cells within 2). Tries a few draws.
+fn edge_cell(
+    map: &Map,
+    g: &[Ground],
+    keep: &[bool],
+    rng: &mut Rng,
+    t: usize,
+) -> Option<((i32, i32), (i32, i32))> {
+    for _ in 0..300 {
+        let (x, y) = sector_cell(map, rng, t);
+        if g_at(map, g, x, y) != Ground::Floor || keep[map.idx(x, y)] {
+            continue;
+        }
+        let beside = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+            .iter()
+            .any(|(dx, dy)| g_at(map, g, x + dx, y + dy) == Ground::Rock);
+        if !beside {
+            continue;
+        }
+        let (mut sx, mut sy) = (0, 0);
+        for dy in -2..=2 {
+            for dx in -2..=2 {
+                if g_at(map, g, x + dx, y + dy) == Ground::Rock {
+                    sx += dx;
+                    sy += dy;
+                }
+            }
+        }
+        if sx != 0 || sy != 0 {
+            return Some(((x, y), (sx, sy)));
+        }
+    }
+    None
+}
+
+/// Floor pushed into the rock beside a floor edge: a disk at least as wide
+/// as a tunnel, so it is never a narrow slot. It is refused if it would
+/// come near floor that is not the edge's own ground (another tunnel behind
+/// the rock), so it never opens a shortcut.
+fn bulge(map: &Map, g: &mut [Ground], keep: &[bool], rng: &mut Rng, t: usize, tw: i32) {
+    let Some(((ex, ey), (sx, sy))) = edge_cell(map, g, keep, rng, t) else {
+        return;
+    };
+    let rr = (tw - 2) / 2;
+    let b = rng.range(rr + 1, rr + 3);
+    let len = isqrt_i(sx * sx + sy * sy).max(1);
+    let (cx, cy) = (ex + sx * (b - 1) / len, ey + sy * (b - 1) / len);
+    let cells = disk_offsets(b);
+    if cells.iter().any(|(dx, dy)| {
+        let (x, y) = (cx + dx, cy + dy);
+        x < 2 || y < 2 || x >= map.w - 2 || y >= map.h - 2 || keep[map.idx(x, y)]
+    }) {
+        return;
+    }
+    // Only into solid rock: at least two thirds of the ground round the
+    // bulge is rock, so it never cuts the inside corner of a bend.
+    let round = disk_offsets(b + 3);
+    let rock = round
+        .iter()
+        .filter(|(dx, dy)| g_at(map, g, cx + dx, cy + dy) == Ground::Rock)
+        .count();
+    if rock * 3 < round.len() * 2 {
+        return;
+    }
+    // Every floor cell within b + 3 of the bulge must be reached from the
+    // edge cell through floor within b + 8: the bulge only widens the
+    // ground it grows from.
+    let far = b + 8;
+    let n = 2 * far + 1;
+    let mut seen = vec![false; (n * n) as usize];
+    let at = |x: i32, y: i32| ((y - cy + far) * n + (x - cx + far)) as usize;
+    let inside = |x: i32, y: i32| (x - cx).abs() <= far && (y - cy).abs() <= far;
+    let mut stack = vec![(ex, ey)];
+    if !inside(ex, ey) {
+        return;
+    }
+    seen[at(ex, ey)] = true;
+    while let Some((x, y)) = stack.pop() {
+        for (dx, dy) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+            let (nx, ny) = (x + dx, y + dy);
+            if inside(nx, ny)
+                && !seen[at(nx, ny)]
+                && g_at(map, g, nx, ny) == Ground::Floor
+                && (nx - cx).pow(2) + (ny - cy).pow(2) <= far * far
+            {
+                seen[at(nx, ny)] = true;
+                stack.push((nx, ny));
+            }
+        }
+    }
+    for (dx, dy) in disk_offsets(b + 3) {
+        let (x, y) = (cx + dx, cy + dy);
+        if g_at(map, g, x, y) != Ground::Rock && !seen[at(x, y)] {
+            return;
+        }
+    }
+    for (dx, dy) in cells {
+        let i = map.idx(cx + dx, cy + dy);
+        if g[i] == Ground::Rock {
+            g[i] = Ground::Floor;
+        }
+    }
+}
+
+/// The width rule while decorating: for every cell, whether the disk of
+/// radius `(tw - 2) / 2` round it is fully open (floor or dirt). An open
+/// cell that no such disk covers is in a passage narrower than the setting
+/// (the rule of `open_ground`). Kept up to date as rock is added.
+struct Width {
+    offs: Vec<(i32, i32)>,
+    full: Vec<bool>,
+}
+
+impl Width {
+    fn new(map: &Map, g: &[Ground], tw: i32) -> Width {
+        let r = (tw - 2) / 2;
+        let open: Vec<bool> = g.iter().map(|c| *c != Ground::Rock).collect();
+        Width {
+            offs: disk_offsets(r),
+            full: disk_all(&open, map.w, map.h, r),
+        }
+    }
+
+    fn is_full(&self, map: &Map, x: i32, y: i32) -> bool {
+        map.inside(x, y) && self.full[map.idx(x, y)]
+    }
+
+    /// Rock was added on `cells`: every disk holding one is no longer
+    /// fully open. Returns the centres changed, for `reopen`.
+    fn close(&mut self, map: &Map, cells: &[usize]) -> Vec<usize> {
+        let mut out = Vec::new();
+        for &c in cells {
+            let (x, y) = (c as i32 % map.w, c as i32 / map.w);
+            for (dx, dy) in &self.offs {
+                let (qx, qy) = (x - dx, y - dy);
+                if map.inside(qx, qy) {
+                    let q = map.idx(qx, qy);
+                    if self.full[q] {
+                        self.full[q] = false;
+                        out.push(q);
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    fn reopen(&mut self, centres: &[usize]) {
+        for &q in centres {
+            self.full[q] = true;
+        }
+    }
+
+    /// The open cells within `rad` of (cx, cy) that no fully open disk
+    /// covers.
+    fn uncovered_near(
+        &self,
+        map: &Map,
+        g: &[Ground],
+        cx: i32,
+        cy: i32,
+        rad: i32,
+    ) -> Vec<(i32, i32)> {
+        let mut out = Vec::new();
+        for y in cy - rad..=cy + rad {
+            for x in cx - rad..=cx + rad {
+                if g_at(map, g, x, y) == Ground::Rock || self.is_full(map, x, y) {
+                    continue;
+                }
+                let covered = self
+                    .offs
+                    .iter()
+                    .any(|(dx, dy)| self.is_full(map, x + dx, y + dy));
+                if !covered {
+                    out.push((x, y));
+                }
+            }
+        }
+        out
+    }
+}
+
+/// A rock bump on a floor edge, radius 1 to 3, smoothed into the rock it
+/// stands on: the floor left in the corners where it meets the rock, too
+/// tight for the width rule, becomes rock as well. Undone if the width rule
+/// would take floor any further away, which means the bump narrowed a
+/// passage below the setting.
+fn bump(
+    map: &Map,
+    g: &mut [Ground],
+    width: &mut Width,
+    keep: &[bool],
+    rng: &mut Rng,
+    t: usize,
+    tw: i32,
+) {
+    let Some(((ex, ey), _)) = edge_cell(map, g, keep, rng, t) else {
+        return;
+    };
+    let b = rng.range(1, 3);
+    let cells: Vec<usize> = disk_offsets(b)
+        .into_iter()
+        .map(|(dx, dy)| (ex + dx, ey + dy))
+        .filter(|&(x, y)| map.inside(x, y))
+        .map(|(x, y)| map.idx(x, y))
+        .collect();
+    if cells.iter().any(|&i| keep[i] || g[i] == Ground::Dirt) {
+        return;
+    }
+    let changed: Vec<usize> = cells
+        .into_iter()
+        .filter(|&i| g[i] == Ground::Floor)
+        .collect();
+    for &i in &changed {
+        g[i] = Ground::Rock;
+    }
+    let closed = width.close(map, &changed);
+    let tight = width.uncovered_near(map, g, ex, ey, b + tw - 1);
+    let reach = (b + 3) * (b + 3);
+    let fillet = tight.iter().all(|&(x, y)| {
+        (x - ex).pow(2) + (y - ey).pow(2) <= reach
+            && !keep[map.idx(x, y)]
+            && g[map.idx(x, y)] == Ground::Floor
+    });
+    if fillet {
+        // No fully open disk holds these cells, so closing them changes
+        // no disk.
+        for (x, y) in tight {
+            let i = map.idx(x, y);
+            g[i] = Ground::Rock;
+        }
+    } else {
+        for &i in &changed {
+            g[i] = Ground::Floor;
+        }
+        width.reopen(&closed);
+    }
+}
+
+/// A rock speck, radius 1 or 2, standing in open floor at least a Tunnel
+/// Width from anything else.
+fn speck(
+    map: &Map,
+    g: &mut [Ground],
+    width: &mut Width,
+    keep: &[bool],
+    rng: &mut Rng,
+    t: usize,
+    tw: i32,
+) {
+    for _ in 0..40 {
+        let (x, y) = sector_cell(map, rng, t);
+        let s = rng.range(1, 2);
+        let clear = disk_offsets(s + tw).iter().all(|(dx, dy)| {
+            let (px, py) = (x + dx, y + dy);
+            g_at(map, g, px, py) == Ground::Floor && !keep[map.idx(px, py)]
+        });
+        if clear {
+            let cells: Vec<usize> = disk_offsets(s)
+                .into_iter()
+                .map(|(dx, dy)| map.idx(x + dx, y + dy))
+                .collect();
+            for &i in &cells {
+                g[i] = Ground::Rock;
+            }
+            width.close(map, &cells);
+            return;
+        }
+    }
 }
 
 /// Fills floor that cannot be reached from home chamber 0, even by digging.
@@ -1697,17 +2301,20 @@ mod tests {
     }
 
     #[test]
-    fn tunnels_maps_are_unchanged_by_the_map_types() {
-        // Captured before Open and Maze were added (TRIAGE row 33).
+    fn tunnels_maps_are_frozen() {
+        // Tunnels maps for these seeds, frozen so a change to them is seen.
+        // Captured again for TRIAGE rows 47 and 50-52: every chamber has
+        // every resource, new node sizes, and each sector decorated on its
+        // own (the hashes taken for TRIAGE row 33 no longer hold).
         let want: [u64; 8] = [
-            7488055123402804849,
-            3611323446265766901,
-            1321311017757191776,
-            12585253177063010217,
-            10417605787577406398,
-            16396770231422784609,
-            10224942019766370966,
-            18369243738233484087,
+            2178450767473459997,
+            11323575075085791838,
+            13029420177463473568,
+            9794210519413522520,
+            15101770702980332516,
+            16372915244465898842,
+            17975477603746795572,
+            15496232582336606526,
         ];
         let mut got = Vec::new();
         for f in [Format::OneVOne, Format::FreeForAll] {
@@ -1771,20 +2378,214 @@ mod tests {
         }
     }
 
+    /// The cell a node or chamber centre of seat 0's sector lands on in
+    /// sector `t`.
+    fn turned(m: &Map, t: usize, p: Pos) -> Pos {
+        rotate_pos(m.w, m.h, m.seats, t, p)
+    }
+
     #[test]
-    fn maps_are_rotationally_symmetric() {
+    fn the_layout_is_rotated_but_the_ground_is_not() {
+        // TRIAGE row 50: chambers, homes and nodes are still exact
+        // rotations (fair by construction), but each sector is decorated on
+        // its own, so the ground is no longer a rotated copy.
         for t in TYPES {
             for (f, seed) in [
                 (Format::OneVOne, 3),
                 (Format::FreeForAll, 4),
                 (Format::OneVOne, 11),
             ] {
-                for s in variants(f, t) {
+                for (k, s) in variants(f, t).into_iter().enumerate() {
                     let m = generate(seed, &s);
-                    for y in 0..m.h {
-                        for x in 0..m.w {
+                    for n in &m.nodes {
+                        let q = turned(&m, 1, n.pos);
+                        assert!(
+                            m.nodes.iter().any(|o| o.pos == q
+                                && o.resource == n.resource
+                                && o.amount == n.amount),
+                            "{t:?} {f:?}: node at {:?} has no rotated twin",
+                            n.pos.cell()
+                        );
+                    }
+                    // The centre chamber is its own rotation (to within a
+                    // cell); every other chamber has a rotated twin.
+                    for c in m.chambers.iter().filter(|c| c.cx != m.w / 2) {
+                        let (rx, ry) = rotate(m.w, m.h, m.seats, 1, c.cx, c.cy);
+                        assert!(
+                            m.chambers
+                                .iter()
+                                .any(|o| (o.cx, o.cy, o.r) == (rx, ry, c.r)),
+                            "{t:?} {f:?}: chamber at {},{}",
+                            c.cx,
+                            c.cy
+                        );
+                    }
+                    let differ = (0..m.h)
+                        .flat_map(|y| (0..m.w).map(move |x| (x, y)))
+                        .filter(|&(x, y)| {
                             let (rx, ry) = rotate(m.w, m.h, m.seats, 1, x, y);
-                            assert_eq!(m.at(x, y), m.at(rx, ry), "{t:?} {f:?} at {x},{y}");
+                            m.at(x, y) != m.at(rx, ry)
+                        })
+                        .count();
+                    // The default settings: at least 0.3% of the map. The
+                    // corner settings (tiny maps of huge chambers and wide
+                    // tunnels) leave little room, but still some.
+                    let least = if k == 0 {
+                        m.ground.len() * 3 / 1000
+                    } else {
+                        20
+                    };
+                    assert!(
+                        differ >= least,
+                        "{t:?} {f:?} seed {seed} {}x{} tw {}: only {differ} cells differ from the rotated map", m.w, m.h, s.tunnel_width
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn walking_distances_count_ten_a_step_and_fourteen_a_diagonal() {
+        // Worked by hand: in an open 5 x 5 room from (1, 1), (4, 1) is three
+        // straight steps (30) and (4, 4) three diagonal ones (42).
+        let mut m = generate(0, &settings(Format::OneVOne));
+        for g in m.ground.iter_mut() {
+            *g = Ground::Rock;
+        }
+        for y in 1..=5 {
+            for x in 1..=5 {
+                let i = m.idx(x, y);
+                m.ground[i] = Ground::Floor;
+            }
+        }
+        // A rock post at (3, 3): the diagonal must go round it.
+        let i = m.idx(3, 3);
+        m.ground[i] = Ground::Rock;
+        let d = walk_distances(&m, 1, 1);
+        assert_eq!(d[m.idx(4, 1)], 30);
+        assert_eq!(d[m.idx(2, 2)], 14);
+        // To (4, 4) the post is in the way and no step may cut past its
+        // corners: one diagonal to (2, 2), then four straight steps round
+        // it, 14 + 4 x 10 = 54.
+        assert_eq!(d[m.idx(4, 4)], 54);
+        assert_eq!(d[m.idx(3, 3)], u32::MAX);
+        assert_eq!(d[m.idx(0, 0)], u32::MAX);
+    }
+
+    /// Nodes by seat: those in the seat's home chamber, and those nearer
+    /// its home than any other (its sector), the centre's left out.
+    fn seat_resources(m: &Map) -> (Vec<[i32; 3]>, Vec<[i32; 3]>) {
+        let mut home = vec![[0; 3]; m.seats];
+        let mut sector = vec![[0; 3]; m.seats];
+        let c = &m.chambers[m.centre];
+        for n in &m.nodes {
+            let (x, y) = n.pos.cell();
+            if (x - c.cx).pow(2) + (y - c.cy).pow(2) <= (c.r + 4).pow(2) {
+                continue;
+            }
+            let d = |s: usize| {
+                let h = m.home(s);
+                (x - h.cx).pow(2) + (y - h.cy).pow(2)
+            };
+            let s = (0..m.seats).min_by_key(|&s| (d(s), s)).unwrap();
+            let h = m.home(s);
+            sector[s][n.resource.index()] += n.amount;
+            if d(s) <= h.r * h.r {
+                home[s][n.resource.index()] += n.amount;
+            }
+        }
+        (home, sector)
+    }
+
+    #[test]
+    fn every_seat_is_equally_well_placed() {
+        // TRIAGE row 50. Per seat, walking without digging: home to the
+        // centre, to every other home, and to its three nearest chambers
+        // are within 5% of the other seats'; home nodes are identical and
+        // each sector's nodes within 5%.
+        for t in TYPES {
+            for seed in 0..8 {
+                for f in [Format::OneVOne, Format::FreeForAll] {
+                    for s in variants(f, t) {
+                        let m = generate(seed, &s);
+                        let d = seat_distances(&m);
+                        assert!(
+                            distances_fair(&d, 5),
+                            "{t:?} seed {seed} {f:?}: distances {d:?}"
+                        );
+                        let (home, sector) = seat_resources(&m);
+                        assert!(
+                            home.iter().all(|h| *h == home[0]),
+                            "{t:?} seed {seed} {f:?}: home nodes {home:?}"
+                        );
+                        for r in 0..3 {
+                            let lo = sector.iter().map(|v| v[r]).min().unwrap();
+                            let hi = sector.iter().map(|v| v[r]).max().unwrap();
+                            assert!(
+                                hi * 100 <= lo * 105,
+                                "{t:?} seed {seed} {f:?}: sector nodes {sector:?}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_seat_has_enough_for_a_full_army_and_more() {
+        // TRIAGE row 47. A 300-Pop Cost army of Tier 2 ants, a third each
+        // by Pop Cost of Soldier, Acid and Turtle Ants, costs (from the
+        // species tables) 100 x 55 + 50 x 50 + 50 x 70 = 11,500 Food and
+        // 50 x 40 + 50 x 30 = 3,500 Nectar. A 1v1 seat's share of the
+        // map's nodes pays for it one and a half times over, leaving room
+        // for workers, structures, upgrades and losses.
+        use crate::rules::Species;
+        let mut army = [0i32; 3];
+        for (s, n) in [
+            (Species::Soldier, 100),
+            (Species::Acid, 50),
+            (Species::Turtle, 50),
+        ] {
+            for (slot, c) in army.iter_mut().zip(s.stats().cost) {
+                *slot += c * n;
+            }
+        }
+        assert_eq!(army, [11_500, 3_500, 0]);
+        for t in TYPES {
+            for seed in 0..6 {
+                let m = generate(seed, &typed(Format::OneVOne, t));
+                let mut share = [0i32; 3];
+                for n in &m.nodes {
+                    share[n.resource.index()] += n.amount / m.seats as i32;
+                }
+                for r in 0..2 {
+                    assert!(
+                        share[r] * 2 >= army[r] * 3,
+                        "{t:?} seed {seed}: a seat has {share:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn every_chamber_has_every_resource() {
+        // TRIAGE row 51: Food, Nectar and Leaves in every chamber.
+        for t in TYPES {
+            for seed in 0..6 {
+                for f in [Format::OneVOne, Format::FreeForAll] {
+                    let m = generate(seed, &typed(f, t));
+                    for (i, c) in m.chambers.iter().enumerate() {
+                        for res in Resource::ALL {
+                            let has = m.nodes.iter().any(|n| {
+                                let (x, y) = n.pos.cell();
+                                n.resource == res
+                                    && !n.cache
+                                    && m.is_floor(x, y)
+                                    && (x - c.cx).pow(2) + (y - c.cy).pow(2) <= c.r * c.r
+                            });
+                            assert!(has, "{t:?} seed {seed} {f:?} chamber {i} lacks {res:?}");
                         }
                     }
                 }
@@ -1860,7 +2661,7 @@ mod tests {
                 for f in [Format::OneVOne, Format::FreeForAll] {
                     for s in variants(f, t) {
                         let plain = generate_open(seed, &s, false);
-                        let m = generate(seed, &s);
+                        let m = generate_open(seed, &s, true);
                         assert!(
                             m.ground == plain.ground,
                             "{t:?} seed {seed} {f:?} needed a rescue passage"
@@ -1871,19 +2672,27 @@ mod tests {
         }
     }
 
-    /// The reachability, home-node and no-rescue checks over many seeds:
-    /// `cargo test --release -p tool_core --lib map::tests::many_seeds --
-    /// --ignored`.
+    /// The reachability, fairness, home-node and no-rescue checks over many
+    /// seeds: `cargo test --release -p tool_core --lib map::tests::many_seeds
+    /// -- --ignored`.
     #[test]
     #[ignore]
     fn many_seeds() {
-        for t in [MapType::Open, MapType::Maze] {
+        for t in TYPES {
             for seed in 100..400 {
                 for f in [Format::OneVOne, Format::FreeForAll] {
                     for s in variants(f, t) {
                         let m = generate(seed, &s);
-                        let plain = generate_open(seed, &s, false);
-                        assert!(m.ground == plain.ground, "{t:?} seed {seed} {f:?} rescue");
+                        if t != MapType::Tunnels {
+                            let plain = generate_open(seed, &s, false);
+                            let rescued = generate_open(seed, &s, true);
+                            assert!(
+                                rescued.ground == plain.ground,
+                                "{t:?} seed {seed} {f:?} rescue"
+                            );
+                        }
+                        let d = seat_distances(&m);
+                        assert!(distances_fair(&d, 5), "{t:?} seed {seed} {f:?} {d:?}");
                         let h0 = m.home(0).clone();
                         let reach = flood(&m, h0.cx, h0.cy, false);
                         for (i, c) in m.chambers.iter().enumerate() {

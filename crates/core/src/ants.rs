@@ -160,15 +160,21 @@ impl World {
 
     fn standable(&self, a: &Ant, p: Pos) -> bool {
         let (x, y) = p.cell();
-        let teams = self.team_table();
-        let t = Terrain {
-            w: self.map.w,
-            h: self.map.h,
-            ground: &self.map.ground,
-            wall: &self.wall,
-            teams: &teams,
-        };
-        t.standable(x, y, a.colony, World::mode_of(a.species))
+        self.cell_standable(a, x, y)
+    }
+
+    /// `Terrain::standable` for this ant, without building a `Terrain`
+    /// (this runs for every step of every ant).
+    fn cell_standable(&self, a: &Ant, x: i32, y: i32) -> bool {
+        if !self.map.inside(x, y) {
+            return false;
+        }
+        let i = self.map.idx(x, y);
+        if self.map.ground[i] != Ground::Floor {
+            return false;
+        }
+        let wall = self.wall[i];
+        wall == NO_WALL || a.species.flies() || self.allied(wall, a.colony)
     }
 
     /// Moves by at most `speed` toward `to`, sliding along obstacles.
@@ -634,9 +640,13 @@ impl World {
         }
     }
 
+    /// The nearest enemy in reach that the ant can walk straight to: an
+    /// ant, else a structure. Enemies behind rock, dirt or an enemy wall
+    /// are left alone (the ant would only press against the wall); the
+    /// waypoint's flow field leads round instead.
     fn find_target(&self, a: &Ant, aggro: i32) -> Option<Target> {
         let me = a.colony;
-        let mut best: Option<(i64, Target)> = None;
+        let mut ants: Vec<(i64, Id, Pos)> = Vec::new();
         for b in self.grid.around(a.pos, aggro) {
             for &j in &self.grid.ants[b] {
                 let o = &self.ants[j as usize];
@@ -644,14 +654,24 @@ impl World {
                     continue;
                 }
                 let d = o.pos.dist2(a.pos);
-                if d <= (aggro as i64).pow(2) && best.map(|x| d < x.0).unwrap_or(true) {
-                    best = Some((d, Target::Ant(o.id)));
+                if d <= (aggro as i64).pow(2) {
+                    ants.push((d, o.id, o.pos));
                 }
             }
         }
-        if best.is_some() {
-            return best.map(|b| b.1);
+        // Nearest first; the nearest is almost always in the open.
+        if let Some(&(_, id, p)) = ants.iter().min() {
+            if self.open_line(a, a.pos, p) {
+                return Some(Target::Ant(id));
+            }
+            ants.sort();
+            for &(_, id, p) in ants.iter().skip(1).take(3) {
+                if self.open_line(a, a.pos, p) {
+                    return Some(Target::Ant(id));
+                }
+            }
         }
+        let mut found: Vec<(i64, Id, Pos)> = Vec::new();
         for b in self.grid.around(a.pos, aggro + 3 * CELL) {
             for &j in &self.grid.structures[b] {
                 let Some(s) = self.structures.get(j as usize) else {
@@ -662,12 +682,49 @@ impl World {
                 }
                 let d = s.pos.dist2(a.pos);
                 let reach = (aggro + s.radius()) as i64;
-                if d <= reach * reach && best.map(|x| d < x.0).unwrap_or(true) {
-                    best = Some((d, Target::Structure(s.id)));
+                if d <= reach * reach {
+                    found.push((d, s.id, s.pos));
                 }
             }
         }
-        best.map(|b| b.1)
+        found.sort();
+        found
+            .into_iter()
+            .take(4)
+            .find(|(_, _, p)| self.open_line(a, a.pos, *p))
+            .map(|(_, id, _)| Target::Structure(id))
+    }
+
+    /// Whether the ant could walk the straight line between two points:
+    /// every cell between them is ground it may stand on (its team's walls
+    /// are gates; Flying Ants cross any wall).
+    fn open_line(&self, a: &Ant, from: Pos, to: Pos) -> bool {
+        let (x0, y0) = from.cell();
+        let (x1, y1) = to.cell();
+        // Bresenham, as `fog::line`, over the cells strictly between.
+        let dx = (x1 - x0).abs();
+        let dy = -(y1 - y0).abs();
+        let sx = if x0 < x1 { 1 } else { -1 };
+        let sy = if y0 < y1 { 1 } else { -1 };
+        let mut err = dx + dy;
+        let (mut x, mut y) = (x0, y0);
+        loop {
+            if x == x1 && y == y1 {
+                return true;
+            }
+            let e2 = 2 * err;
+            if e2 >= dy {
+                err += dy;
+                x += sx;
+            }
+            if e2 <= dx {
+                err += dx;
+                y += sy;
+            }
+            if (x, y) != (x1, y1) && !self.cell_standable(a, x, y) {
+                return false;
+            }
+        }
     }
 
     /// Whether a straight line between two points crosses rock, dirt or a
@@ -768,18 +825,23 @@ impl World {
                     }
                     return;
                 }
-                let sp = self.speed_of(a);
-                let before = a.pos;
-                self.step_toward(a, tp, sp);
-                if a.pos == before {
-                    // Cannot get closer in a straight line: forget it.
-                    if !matches!(t, Target::Dirt(..)) {
+                if !matches!(t, Target::Dirt(..)) && !self.open_line(a, a.pos, tp) {
+                    // Behind rock, dirt or an enemy wall now: pressing
+                    // against it would get nowhere. Forget it and walk on.
+                    a.target = None;
+                } else {
+                    let sp = self.speed_of(a);
+                    let before = a.pos;
+                    self.step_toward(a, tp, sp);
+                    if a.pos == before && !matches!(t, Target::Dirt(..)) {
+                        // Cannot get closer in a straight line: forget it.
                         a.target = None;
                     }
+                    return;
                 }
-                return;
+            } else {
+                a.target = None;
             }
-            a.target = None;
         }
 
         // No target: go to this ant's waypoint, or wait at the nearest nest.
