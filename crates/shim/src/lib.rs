@@ -82,6 +82,38 @@ impl Game {
     pub fn outbox(&mut self) -> String {
         self.s.outbox()
     }
+
+    pub fn frame(&self) -> Vec<i32> {
+        self.s.frame()
+    }
+
+    pub fn terrain_stamp(&self) -> u32 {
+        self.s.terrain_stamp()
+    }
+
+    pub fn terrain_size(&self) -> Vec<i32> {
+        self.s.terrain_size()
+    }
+
+    pub fn terrain(&self) -> Vec<u8> {
+        self.s.terrain()
+    }
+
+    pub fn fog_stamp(&self) -> i32 {
+        self.s.fog_stamp()
+    }
+
+    pub fn fog_size(&self) -> Vec<i32> {
+        self.s.fog_size()
+    }
+
+    pub fn fog(&self) -> Vec<u8> {
+        self.s.fog()
+    }
+
+    pub fn minimap(&self, size: f64) -> Vec<u8> {
+        self.s.minimap(size as i32)
+    }
 }
 
 /// The draw list's assets (op codes, palette, shapes, scales) as JSON text.

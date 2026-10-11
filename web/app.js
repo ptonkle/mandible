@@ -1,7 +1,8 @@
 // The page draws what the core returns and decides nothing. It builds the
 // DOM from the core's view model (ui()), forwards keyboard, mouse and
 // transport events, and keeps the two settings strings in browser storage.
-import init, { Game } from "./pkg/tool_shim.js";
+import init, { Game, render_assets } from "./pkg/tool_shim.js";
+import { createRenderer } from "./render.js";
 
 const el = (id) => document.getElementById(id);
 const make = (tag, cls, text) => {
@@ -17,6 +18,9 @@ let lastText = "";
 let ui = null;
 let hovered = null;
 let renderer = null;
+let assets = null;
+let terrainStamp = null;
+let fogStamp = null;
 
 function readStore(key) {
   try {
@@ -330,6 +334,33 @@ function resize() {
   map.width = map.clientWidth;
   map.height = map.clientHeight;
   game.resize(map.width, map.height);
+  const mini = el("minimap");
+  mini.width = mini.clientWidth;
+  mini.height = mini.clientWidth;
+  fogStamp = null;
+}
+
+// ---- drawing: the core lays out every frame; the page replays it ----
+
+function drawMatch() {
+  if (!renderer) renderer = createRenderer(el("map"), assets);
+  const ts = game.terrain_stamp();
+  if (ts !== terrainStamp) {
+    const size = game.terrain_size();
+    renderer.setImage(assets.images.terrain, size[0], size[1], game.terrain());
+    terrainStamp = ts;
+    resize();
+  }
+  const fs = game.fog_stamp();
+  if (fs !== fogStamp) {
+    const size = game.fog_size();
+    renderer.setImage(assets.images.fog, size[0], size[1], game.fog());
+    const mini = el("minimap");
+    const bytes = new Uint8ClampedArray(game.minimap(mini.width));
+    if (bytes.length) mini.getContext("2d").putImageData(new ImageData(bytes, mini.width, mini.width), 0, 0);
+    fogStamp = fs;
+  }
+  renderer.draw(game.frame());
 }
 
 // ---- transport ----
@@ -399,7 +430,7 @@ function refresh() {
 function frame(now) {
   game.advance(now);
   refresh();
-  if (renderer && ui && ui.screen === "match") renderer.draw(game);
+  if (ui && ui.screen === "match") drawMatch();
   flushNet();
   requestAnimationFrame(frame);
 }
@@ -414,6 +445,7 @@ async function start() {
   crypto.getRandomValues(entropy);
   game = new Game(strings, glossary, readStore("defaults"), readStore("player"), crypto.randomUUID(), entropy[0]);
   hints = JSON.parse(game.hints());
+  assets = JSON.parse(render_assets());
   bindInput();
   refresh();
   document.body.dataset.ready = "true";

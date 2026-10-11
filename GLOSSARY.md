@@ -73,7 +73,7 @@ How to read the tables:
 | Seat | ◆ | One place in a match, shown by its player color. | slot, spot, position |
 | You | ◆ | The local player's seat. | me, player 1 |
 | Open, Closed | ◆ | Lobby seat states: Open waits for a player; Closed is not played. An Open seat at Start is filled by a Pupa AI. | empty, locked (that is the tier gate) |
-| Blue, Orange, Green, Pink | ◆ | The player colors of seats 1–4, chosen to be easy to tell apart. | red, purple, team color |
+| Red, Blue, Yellow, White | ◆ | The player colors of seats 1–4, chosen to be easy to tell apart on every biome. | orange, purple, team color |
 
 ## 2. Map
 
@@ -262,6 +262,7 @@ Rejected names. Do not reuse them without passing the naming test.
 | Ants, Build, Waypoints, Upgrades, Colony | ◆ | The five grid tabs, on keys 1–5. | units, buildings, research, economy |
 | Pan, Edge Pan | ◆ | Moving the view: Pan with the arrow keys or by dragging; Edge Pan moves it when the pointer touches the screen edge. | scroll, camera move |
 | Benchmark | ★ | The Player Settings button that runs the performance-test scenario live, with its budget. | perf test, stress test |
+| Frames per second, Tick average, Tick worst, Draw average, Budget, Measuring, Within budget, Over budget | ◆ | The Benchmark panel's labels and states: drawing rate; simulation time per tick (average and worst); drawing time per frame; the budget (tick under 8 ms, 60 frames per second); and whether the run is inside it. | FPS, lag, performance score |
 | Hotkey | ★ | The key that triggers an action button. It follows the button's position on the keyboard. | shortcut, keybind (that is the setting), key |
 | Keybinds | ★ | The Player Settings screen where hotkeys are remapped. | controls, key mapping |
 | Resource Bar | ◆ | The top display of Food, Nectar and Leaves, each with its income, plus population. | HUD, resource panel |
@@ -322,3 +323,5 @@ Used in code, docs and conversation only. **Never shown on screen**, and no term
 | Term | Origin | Meaning | Never say |
 | --- | --- | --- | --- |
 | Overlap | ★ | How far ants may push into each other. Kept small so fights stay readable. | stacking, clumping |
+| Tick | ◆ | One simulation step: 10 per second at Normal Game Speed. Used in code, docs and the Benchmark only. | frame (that is drawing), turn (that is the network's per-tick message) |
+| Turn | ◆ | A player's commands for one tick, sent to every peer in Online Multiplayer. | packet, input frame |

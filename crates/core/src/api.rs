@@ -121,6 +121,44 @@ impl Session {
         }
     }
 
+    pub fn frame(&self) -> Vec<i32> {
+        self.app.as_ref().map(|a| a.frame()).unwrap_or_default()
+    }
+
+    pub fn terrain_stamp(&self) -> u32 {
+        self.app.as_ref().map(|a| a.terrain_stamp()).unwrap_or(0)
+    }
+
+    pub fn terrain_size(&self) -> Vec<i32> {
+        self.app
+            .as_ref()
+            .map(|a| a.terrain_size())
+            .unwrap_or_default()
+    }
+
+    pub fn terrain(&self) -> Vec<u8> {
+        self.app.as_ref().map(|a| a.terrain()).unwrap_or_default()
+    }
+
+    pub fn fog_stamp(&self) -> i32 {
+        self.app.as_ref().map(|a| a.fog_stamp()).unwrap_or(-1)
+    }
+
+    pub fn fog_size(&self) -> Vec<i32> {
+        self.app.as_ref().map(|a| a.fog_size()).unwrap_or_default()
+    }
+
+    pub fn fog(&self) -> Vec<u8> {
+        self.app.as_ref().map(|a| a.fog()).unwrap_or_default()
+    }
+
+    pub fn minimap(&self, size: i32) -> Vec<u8> {
+        self.app
+            .as_ref()
+            .map(|a| a.minimap(size))
+            .unwrap_or_default()
+    }
+
     pub fn app(&mut self) -> Option<&mut App> {
         self.app.as_mut()
     }

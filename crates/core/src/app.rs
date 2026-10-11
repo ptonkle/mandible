@@ -17,6 +17,7 @@ use crate::lockstep::{
     Lobby, LobbyStatus, Match, MatchStatus, Outgoing, PeerId, Seat, SeatKind as NetSeat, Target,
     Version,
 };
+use crate::render::{self, Camera, Overlay, Placing, SUB_PX};
 use crate::rules::{
     evolve_cost, Resource, Role, Species, StructureKind, Upgrade, TICKS_PER_SECOND,
 };
@@ -130,40 +131,10 @@ pub enum Mode {
     Waypoint(Option<Species>),
 }
 
-/// The camera: the world point at the centre of the view, and the zoom as
-/// screen pixels per cell.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct View {
-    pub cx: i32,
-    pub cy: i32,
-    pub px_per_cell: i32,
-    pub w: i32,
-    pub h: i32,
-}
-
-pub const ZOOM_MIN: i32 = 3;
-pub const ZOOM_MAX: i32 = 24;
-
-impl View {
-    pub fn to_world(&self, sx: i32, sy: i32) -> Pos {
-        Pos::new(
-            self.cx + (sx - self.w / 2) * CELL / self.px_per_cell,
-            self.cy + (sy - self.h / 2) * CELL / self.px_per_cell,
-        )
-    }
-
-    pub fn to_screen(&self, p: Pos) -> (i32, i32) {
-        (
-            (p.x - self.cx) * self.px_per_cell / CELL + self.w / 2,
-            (p.y - self.cy) * self.px_per_cell / CELL + self.h / 2,
-        )
-    }
-
-    pub fn clamp(&mut self, map_w: i32, map_h: i32) {
-        self.px_per_cell = self.px_per_cell.clamp(ZOOM_MIN, ZOOM_MAX);
-        self.cx = self.cx.clamp(0, map_w * CELL);
-        self.cy = self.cy.clamp(0, map_h * CELL);
-    }
+/// Screen pixels of a world point under the camera.
+pub fn to_pixels(cam: &Camera, p: Pos) -> (i32, i32) {
+    let (x, y) = cam.screen(p);
+    (x / SUB_PX, y / SUB_PX)
 }
 
 pub struct Game {
@@ -171,7 +142,9 @@ pub struct Game {
     pub me: u8,
     pub tab: usize,
     pub mode: Mode,
-    pub view: View,
+    pub view: Camera,
+    /// Pixels a pan key or screen edge moves the view per second.
+    pub pan_speed: i32,
     pub mouse: (i32, i32),
     pub drag: Option<(i32, i32, i32, i32)>,
     pub pan_keys: [bool; 4],
@@ -188,19 +161,17 @@ pub struct Game {
 impl Game {
     pub fn new(world: World, me: u8, lockstep: Option<Match>) -> Game {
         let h = world.map.home(me as usize);
-        let view = View {
-            cx: h.cx * CELL + CELL / 2,
-            cy: h.cy * CELL + CELL / 2,
-            px_per_cell: 10,
-            w: 1280,
-            h: 720,
-        };
+        let mut view = Camera::new(1280, 720);
+        view.zoom = 12; // 12 pixels per cell: ants clearly visible
+        view.centre_x = h.cx * CELL + CELL / 2;
+        view.centre_y = h.cy * CELL + CELL / 2;
         Game {
             world,
             me,
             tab: 0,
             mode: Mode::Idle,
             view,
+            pan_speed: 900,
             mouse: (0, 0),
             drag: None,
             pan_keys: [false; 4],
@@ -233,7 +204,7 @@ impl Game {
     }
 
     fn mouse_cell(&self) -> (i32, i32) {
-        self.view.to_world(self.mouse.0, self.mouse.1).cell()
+        self.view.world_at(self.mouse.0, self.mouse.1).cell()
     }
 }
 
@@ -1518,9 +1489,10 @@ impl App {
             }
         } else if slot == "home" {
             if let Some(g) = &mut self.game {
-                if let Some(q) = g.world.nearest_queen(g.me, Pos::new(g.view.cx, g.view.cy)) {
-                    g.view.cx = q.pos.x;
-                    g.view.cy = q.pos.y;
+                let here = Pos::new(g.view.centre_x, g.view.centre_y);
+                if let Some(q) = g.world.nearest_queen(g.me, here) {
+                    g.view.centre_x = q.pos.x;
+                    g.view.centre_y = q.pos.y;
                 }
             }
         }
@@ -1568,9 +1540,9 @@ impl App {
                         g.mode = Mode::Idle;
                     }
                 }
-                _ => g.drag = Some((x, y, g.view.cx, g.view.cy)),
+                _ => g.drag = Some((x, y, 0, 0)),
             },
-            (0, 1) => g.drag = Some((x, y, g.view.cx, g.view.cy)),
+            (0, 1) => g.drag = Some((x, y, 0, 0)),
             (1, 0) => {
                 if let Mode::Wall(Some((sx, sy))) = g.mode {
                     g.issue(Command::Place {
@@ -1608,10 +1580,10 @@ impl App {
                 }
             }
             (2, _) => {
-                if let Some((sx, sy, vx, vy)) = g.drag {
-                    g.view.cx = vx - (x - sx) * CELL / g.view.px_per_cell;
-                    g.view.cy = vy - (y - sy) * CELL / g.view.px_per_cell;
+                if let Some((sx, sy, _, _)) = g.drag {
+                    g.view.pan(x - sx, y - sy);
                     g.view.clamp(g.world.map.w, g.world.map.h);
+                    g.drag = Some((x, y, 0, 0));
                 }
             }
             _ => {}
@@ -1624,21 +1596,15 @@ impl App {
             return;
         }
         if let Some(g) = &mut self.game {
-            let before = g.view.to_world(g.mouse.0, g.mouse.1);
             let step = if dy < 0 { 1 } else { -1 };
-            g.view.px_per_cell += step * (1 + g.view.px_per_cell / 8);
-            g.view.clamp(g.world.map.w, g.world.map.h);
-            let after = g.view.to_world(g.mouse.0, g.mouse.1);
-            g.view.cx += before.x - after.x;
-            g.view.cy += before.y - after.y;
+            g.view.zoom_at(step, g.mouse.0, g.mouse.1);
             g.view.clamp(g.world.map.w, g.world.map.h);
         }
     }
 
     pub fn resize(&mut self, w: i32, h: i32) {
         if let Some(g) = &mut self.game {
-            g.view.w = w.max(1);
-            g.view.h = h.max(1);
+            g.view.resize(w, h);
         }
     }
 
@@ -1646,8 +1612,14 @@ impl App {
     /// pixels and shows the whole map.
     pub fn jump(&mut self, x: i32, y: i32, w: i32, h: i32) {
         if let Some(g) = &mut self.game {
-            g.view.cx = g.world.map.w * CELL / w.max(1) * x.clamp(0, w);
-            g.view.cy = g.world.map.h * CELL / h.max(1) * y.clamp(0, h);
+            // The minimap shows the whole map, square, centred in its box.
+            let m = g.world.map.w.max(g.world.map.h);
+            let side = w.min(h).max(1);
+            let ox = (w - side) / 2 + (m - g.world.map.w) * side / m / 2;
+            let oy = (h - side) / 2 + (m - g.world.map.h) * side / m / 2;
+            g.view.centre_x = (x - ox) * m * CELL / side;
+            g.view.centre_y = (y - oy) * m * CELL / side;
+            g.view.clamp(g.world.map.w, g.world.map.h);
         }
     }
 
@@ -1669,16 +1641,19 @@ impl App {
             return;
         };
         // Camera: arrow keys and screen edges.
-        let pan = CELL * 40 * dt as i32 / 1000 * 12 / g.view.px_per_cell.max(1);
+        let pan = g.pan_speed * dt as i32 / 1000;
         let edge = 4;
         let (mx, my) = g.mouse;
         let e = self.player.edge_pan && g.drag.is_none() && g.mouse != (0, 0);
         let left = g.pan_keys[0] || (e && mx <= edge);
-        let right = g.pan_keys[1] || (e && mx >= g.view.w - edge);
+        let right = g.pan_keys[1] || (e && mx >= g.view.view_w - edge);
         let up = g.pan_keys[2] || (e && my <= edge);
-        let down = g.pan_keys[3] || (e && my >= g.view.h - edge);
-        g.view.cx += pan * (right as i32 - left as i32);
-        g.view.cy += pan * (down as i32 - up as i32);
+        let down = g.pan_keys[3] || (e && my >= g.view.view_h - edge);
+        // pan() moves the map with the pointer, so the view goes the other way.
+        g.view.pan(
+            pan * (left as i32 - right as i32),
+            pan * (up as i32 - down as i32),
+        );
         g.view.clamp(g.world.map.w, g.world.map.h);
 
         if g.world.winner.is_some() {
@@ -1740,6 +1715,101 @@ impl App {
                 // Behind (a peer waited): never run ahead of real time later.
                 g.acc_ms = g.acc_ms.min(ms * 2);
             }
+        }
+    }
+
+    // ---- drawing ----
+
+    /// The draw list for this animation frame (empty outside a match).
+    pub fn frame(&self) -> Vec<i32> {
+        let Some(g) = &self.game else {
+            return Vec::new();
+        };
+        let (cx, cy) = g.mouse_cell();
+        let place = match g.mode {
+            Mode::Place(kind) => Some((kind, cx, cy, cx, cy)),
+            Mode::Wall(Some((sx, sy))) => Some((StructureKind::Wall, sx, sy, cx, cy)),
+            Mode::Wall(None) => Some((StructureKind::Wall, cx, cy, cx, cy)),
+            _ => None,
+        }
+        .map(|(kind, x, y, x2, y2)| Placing {
+            colony: g.me,
+            kind,
+            x,
+            y,
+            x2,
+            y2,
+            valid: g.world.check_place(g.me, kind, x, y, x2, y2).is_ok()
+                && g.world.can_pay(g.me, &place_cost(kind, x, y, x2, y2)),
+        });
+        let mouse = g.view.world_at(g.mouse.0, g.mouse.1);
+        let hover_waypoint = g.world.colonies[g.me as usize]
+            .waypoints
+            .iter()
+            .flatten()
+            .copied()
+            .filter(|w| w.dist(mouse) <= 3 * CELL)
+            .min_by_key(|w| w.dist2(mouse));
+        let overlay = Overlay {
+            terrain_scale: render::TERRAIN_SCALE,
+            place,
+            hover_waypoint,
+        };
+        render::frame(&g.world, Some(g.me), &g.view, &overlay, g.interp_permille())
+    }
+
+    /// Changes when the terrain image must be painted again: a new match,
+    /// or dirt dug away.
+    pub fn terrain_stamp(&self) -> u32 {
+        match &self.game {
+            Some(g) => render::terrain_stamp(&g.world) ^ (g.world.seed as u32).rotate_left(16),
+            None => 0,
+        }
+    }
+
+    /// [width, height] of the terrain image.
+    pub fn terrain_size(&self) -> Vec<i32> {
+        match &self.game {
+            Some(g) => vec![
+                g.world.map.w * render::TERRAIN_SCALE,
+                g.world.map.h * render::TERRAIN_SCALE,
+            ],
+            None => vec![0, 0],
+        }
+    }
+
+    /// The terrain image's RGBA bytes.
+    pub fn terrain(&self) -> Vec<u8> {
+        match &self.game {
+            Some(g) => render::terrain_image(&g.world, render::TERRAIN_SCALE).2,
+            None => Vec::new(),
+        }
+    }
+
+    /// Changes every tick: the fog and minimap images are painted again.
+    pub fn fog_stamp(&self) -> i32 {
+        self.game.as_ref().map(|g| g.world.tick).unwrap_or(-1)
+    }
+
+    pub fn fog_size(&self) -> Vec<i32> {
+        match &self.game {
+            Some(g) => vec![g.world.map.w, g.world.map.h],
+            None => vec![0, 0],
+        }
+    }
+
+    pub fn fog(&self) -> Vec<u8> {
+        match &self.game {
+            Some(g) => render::fog_image(&g.world, Some(g.me)),
+            None => Vec::new(),
+        }
+    }
+
+    /// The minimap, `size` x `size` RGBA.
+    pub fn minimap(&self, size: i32) -> Vec<u8> {
+        match &self.game {
+            Some(g) => render::minimap(&g.world, Some(g.me), &g.view, size),
+            None => Vec::new(),
         }
     }
 
@@ -1989,6 +2059,17 @@ impl App {
             })
             .collect();
         Value::Array(v)
+    }
+}
+
+/// What a blueprint will cost: walls cost per cell.
+fn place_cost(kind: StructureKind, x: i32, y: i32, x2: i32, y2: i32) -> [i32; 3] {
+    let base = kind.stats().cost;
+    if kind == StructureKind::Wall {
+        let n = World::wall_cells(x, y, x2, y2).len() as i32;
+        [base[0] * n, base[1] * n, base[2] * n]
+    } else {
+        base
     }
 }
 

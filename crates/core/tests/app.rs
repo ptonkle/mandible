@@ -121,7 +121,7 @@ fn placing_a_brood_cell_by_mouse_makes_a_blueprint() {
             6,
         )
         .unwrap();
-        g.view.to_screen(tool_core::fixed::Pos::of_cell(x, y))
+        tool_core::app::to_pixels(&g.view, tool_core::fixed::Pos::of_cell(x, y))
     };
     a.mouse("mousemove", 0, sx, sy, false);
     a.mouse("mousedown", 0, sx, sy, false);
