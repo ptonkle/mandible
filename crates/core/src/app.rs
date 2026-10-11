@@ -1019,7 +1019,7 @@ impl App {
                 rows.push(row(
                     "stat.hotkey",
                     format!(
-                        "{key} · Ctrl {key}: {} · Shift {key}: {}",
+                        "{key} · Ctrl/Alt {key}: {} · Shift {key}: {}",
                         self.t("action.train_10"),
                         self.t("action.train_max")
                     ),

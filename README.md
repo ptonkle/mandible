@@ -1,17 +1,56 @@
-# A Builder tool
+# Ant Colony
 
-Replace this file with your tool's README once `BRIEF.md` is written.
+A macro-focused real-time strategy game about ant colonies, played in the browser: 1v1, 2v2 or Free-for-all, against the AI or online. You never select an ant. You train them, place blueprints, set waypoints per species and buy upgrades, all from a keyboard-shaped action grid.
 
-This directory is a copy of the Builder template. Its rules are in `BUILDER-SPEC.md`, and a coding agent's instructions are in `CLAUDE.md` and `AGENTS.md`.
+Every game word is defined in [`GLOSSARY.md`](GLOSSARY.md). The design is in [`BRIEF.md`](BRIEF.md) and the build decisions in [`PLAN.md`](PLAN.md).
+
+## How to play
+
+| Goal | How |
+| --- | --- |
+| Win | Eliminate every enemy colony: no ants, queens or hatcheries left. Walls and brood cells do not keep a colony alive. |
+| Gather | Harvester Ants gather by themselves. Choose a **Gather Focus** on the Colony tab. Every node has a **Saturation** of 8. |
+| Spend | Every resource goes into one **stockpile**, spendable anywhere at once. |
+| Build | Place a **blueprint** (Build tab). Carpenter Ants carry its cost from a queen to the blueprint, then build it. |
+| Housing | Queens give 20 and brood cells give 15, up to the **Pop Cap** of 300. Training waits while **Housing Full**. |
+| Train | From anywhere, with no selection: Tier 1 species from queens, the rest from their **hatchery**. |
+| Fight | Set **waypoints** per species (Waypoints tab). Ants walk there and fight whatever they meet on the way. **All Ants** sets one waypoint for every combat species. |
+| Tech | **Evolve** to Tier 2 and Tier 3 (Colony tab) to unlock species and upgrade ranks. |
+| Events | A **Windfall** (a cache of resources) or a **Hill** (hold it longest to win a bundle) appears every 60–90 s from 1:30. |
+
+### Controls
+
+| Action | Default |
+| --- | --- |
+| Grid tabs: Ants, Build, Waypoints, Upgrades, Colony | `1` `2` `3` `4` `5` |
+| Grid buttons, laid out like the keyboard | `Q W E R` / `A S D F` / `Z X C V` |
+| Train 10 / Train Max | Ctrl or Alt + button / Shift + button |
+| Place a blueprint; set a waypoint | Button, then left-click the map. Shift keeps placing. |
+| Wall | Button, then press, drag and release |
+| Clear a waypoint; cancel a blueprint | Right-click it |
+| Cancel a queued item | Click it in the queue bar (refunded) |
+| Pan the view | Drag, arrow keys, screen edges, or the minimap |
+| Zoom | Mouse wheel |
+| Home Nest | `Space` |
+| Menu (Resume, Concede); cancel placement | `Esc` |
+
+Every hotkey can be remapped in **Player Settings → Keybinds**. Ctrl+W cannot be caught by a web page, so Alt also gives Train 10.
 
 ## Build, test and serve
 
 ```bash
 ./scripts/setup.sh          # once: Python venv with Playwright and three browsers
-cargo test --workspace      # the core and boundary tests, in seconds
+cargo test --workspace      # the core, app, glossary and boundary tests
 ./scripts/build.sh          # release WebAssembly build into dist/
 python3 scripts/serve.py    # http://127.0.0.1:8000/
 ./scripts/check.sh          # everything, before a deploy
+```
+
+Slow checks, run by hand and recorded in `MEASUREMENTS.md`:
+
+```bash
+cargo test --release -p tool_core --test perf -- --ignored --nocapture   # 1,200 ants within budget
+cargo test --release -p tool_core --test ai -- --ignored --nocapture     # Imago > Pupa > Larva
 ```
 
 Needs Rust with the `wasm32-unknown-unknown` target, `wasm-bindgen-cli` 0.2.127, and Python 3.
@@ -20,9 +59,14 @@ Needs Rust with the `wasm32-unknown-unknown` target, `wasm-bindgen-cli` 0.2.127,
 
 | Path | Holds |
 | --- | --- |
-| `crates/core` | every application rule; no input or output |
-| `crates/shim` | the `wasm-bindgen` functions the page calls; each is one call into the core |
-| `web/` | the static page |
-| `data/` | reader-visible text and content |
-| `tests/browser/` | the three-engine browser check and this tool's interactions |
-| `scripts/` | build, check, serve, import audit, mutation audit |
+| `crates/core/src/rules.rs` | balance tables: species, structures, upgrades, tiers |
+| `crates/core/src/map.rs` | seeded, rotation-symmetric map generation |
+| `crates/core/src/world.rs`, `ants.rs` | the simulation: commands, production, economy, combat, events, victory |
+| `crates/core/src/nav.rs`, `fog.rs` | flow-field pathfinding; line-of-sight fog of war |
+| `crates/core/src/ai.rs` | the AI (Larva, Pupa, Imago), inside the simulation |
+| `crates/core/src/lockstep/` | online lockstep: lobby, per-player turns, resync, agreed drops |
+| `crates/core/src/app.rs`, `keys.rs` | screens, settings, keybinds, action grid, tooltips, HUD |
+| `crates/shim` | the `wasm-bindgen` methods the page calls; each is one call into the core |
+| `web/` | the static page: DOM from the core's view model, canvas drawing, input |
+| `data/strings.json`, `data/glossary.json` | every on-screen word, and the term hints |
+| `tests/browser/` | the three-engine browser check and the game's interactions |
