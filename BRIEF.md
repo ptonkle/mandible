@@ -158,6 +158,7 @@ Player actions are global. There is no selecting of particular ants or queens.
 ### 15. Graphics
 
 - Simple graphics are fine.
+- Smooth, not tiled, like Age of Mythology rather than Age of Empires II. Tunnel and chamber edges are drawn as smooth, organic shapes, ants move continuously, and no tile grid is ever visible. A fine grid, about one ant per cell, is allowed inside the core for pathfinding and fog only. *[Added 2026-10-10.]*
 - No health bars. Ants show no health. Each structure shows its health as a **health pie**: its player-color fill shrinks like a pie chart as health falls. *[Added 2026-10-10.]*
 - The look evokes the setting (a picnic or a flower field).
 - Everything a player owns shows that player's color, and each kind of thing has its own shape.
