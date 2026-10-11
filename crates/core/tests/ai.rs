@@ -3,10 +3,26 @@
 //! ignored by default; run it with
 //!
 //!     cargo test --release -p tool_core --test ai -- --ignored --nocapture
+//!
+//! MAP_TYPE=open or MAP_TYPE=maze runs every test here on that Map Type
+//! (default Tunnels).
 
 use tool_core::rules::TICKS_PER_SECOND;
-use tool_core::settings::{Difficulty, MatchSettings, SeatKind};
+use tool_core::settings::{Difficulty, MapType, MatchSettings, SeatKind};
 use tool_core::world::World;
+
+/// The default Match Settings, with the Map Type from MAP_TYPE.
+fn settings() -> MatchSettings {
+    let map_type = match std::env::var("MAP_TYPE").as_deref() {
+        Ok("open") => MapType::Open,
+        Ok("maze") => MapType::Maze,
+        _ => MapType::Tunnels,
+    };
+    MatchSettings {
+        map_type,
+        ..MatchSettings::default()
+    }
+}
 
 /// 20 minutes of game time: no match should get near it.
 const LIMIT: i32 = 20 * 60 * TICKS_PER_SECOND;
@@ -16,11 +32,7 @@ const MEDIAN_LIMIT: i32 = 10 * 60 * TICKS_PER_SECOND;
 
 /// Plays one match; returns the winning seat (or None) and the tick it ended.
 fn play(seed: u64, a: Difficulty, b: Difficulty) -> (Option<u8>, i32) {
-    let mut w = World::new(
-        seed,
-        MatchSettings::default(),
-        &[SeatKind::Ai(a), SeatKind::Ai(b)],
-    );
+    let mut w = World::new(seed, settings(), &[SeatKind::Ai(a), SeatKind::Ai(b)]);
     while w.winner.is_none() && w.tick < LIMIT {
         w.step(&[], &[]);
     }
@@ -58,6 +70,7 @@ fn ladder(strong: Difficulty, weak: Difficulty) -> (i32, i32, Vec<i32>) {
 #[test]
 #[ignore]
 fn imago_beats_pupa_and_pupa_beats_larva() {
+    eprintln!("AI: Map Type {:?}", settings().map_type);
     let (w1, g1, l1) = ladder(Difficulty::Imago, Difficulty::Pupa);
     eprintln!("AI: Imago beat Pupa {w1}/{g1}, lengths {l1:?}");
     let (w2, g2, l2) = ladder(Difficulty::Pupa, Difficulty::Larva);
@@ -104,7 +117,7 @@ fn trace() {
         .unwrap_or(60 * TICKS_PER_SECOND);
     let mut w = World::new(
         seed,
-        MatchSettings::default(),
+        settings(),
         &[SeatKind::Ai(diff("A")), SeatKind::Ai(diff("B"))],
     );
     // DEBUG=from-to prints seat 0's AI commands in that tick range.
@@ -183,6 +196,21 @@ fn trace() {
     }
     eprintln!("winner {:?} at {}", w.winner, w.tick);
     if w.winner.is_none() {
+        for s in w
+            .structures
+            .iter()
+            .filter(|s| s.kind != StructureKind::Wall)
+        {
+            let (x, y) = s.pos.cell();
+            eprintln!(
+                "left c{} {:?} at {:?} complete {} chamber {:?}",
+                s.colony,
+                s.kind,
+                (x, y),
+                s.complete,
+                w.map.chamber_at(x, y)
+            );
+        }
         for a in &w.ants {
             let (x, y) = a.pos.cell();
             let ch = w.map.chamber_at(x, y);
@@ -202,11 +230,7 @@ fn trace() {
 fn trace_gather() {
     use tool_core::rules::Species;
     use tool_core::world::Job;
-    let mut w = World::new(
-        0,
-        MatchSettings::default(),
-        &[SeatKind::Human, SeatKind::Human],
-    );
+    let mut w = World::new(0, settings(), &[SeatKind::Human, SeatKind::Human]);
     for t in [5, 50, 150, 300] {
         while w.tick < t {
             w.step(&[], &[]);
@@ -260,11 +284,7 @@ fn duel() {
             })
             .collect()
     };
-    let mut w = World::new(
-        0,
-        MatchSettings::default(),
-        &[SeatKind::Human, SeatKind::Human],
-    );
+    let mut w = World::new(0, settings(), &[SeatKind::Human, SeatKind::Human]);
     let ch = w.map.chambers[w.map.centre].clone();
     let mut ids: [Vec<u32>; 2] = [Vec::new(), Vec::new()];
     for (colony, key, dx) in [(0u8, "X", -5), (1u8, "Y", 5)] {
@@ -307,11 +327,7 @@ fn map_nodes() {
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(0);
-    let w = World::new(
-        seed,
-        MatchSettings::default(),
-        &[SeatKind::Human, SeatKind::Human],
-    );
+    let w = World::new(seed, settings(), &[SeatKind::Human, SeatKind::Human]);
     let h = w.map.home(0);
     let hp = Pos::of_cell(h.cx, h.cy);
     eprintln!("map {}x{} home0 {:?}", w.map.w, w.map.h, (h.cx, h.cy));
@@ -323,5 +339,98 @@ fn map_nodes() {
     v.sort();
     for n in v {
         eprintln!("{n:?}");
+    }
+}
+
+/// Prints a seed's map (MAP_TYPE, SEED, SEATS=2 or 4) one character per
+/// cell: '#' rock, '%' dirt, ' ' floor, '$' cache, 'F'/'N'/'L' nodes, 'H'
+/// home centres, '+' other chamber centres.
+#[test]
+#[ignore]
+fn map_dump() {
+    use tool_core::map::Ground;
+    use tool_core::rules::Resource;
+    use tool_core::settings::Format;
+    let seed: u64 = std::env::var("SEED")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+    let format = match std::env::var("SEATS").as_deref() {
+        Ok("4") => Format::FreeForAll,
+        _ => Format::OneVOne,
+    };
+    let s = MatchSettings {
+        format,
+        ..settings()
+    };
+    let m = tool_core::map::generate(seed, &s);
+    let mut rows: Vec<Vec<char>> = (0..m.h)
+        .map(|y| {
+            (0..m.w)
+                .map(|x| match m.at(x, y) {
+                    Ground::Rock => '#',
+                    Ground::Dirt => '%',
+                    Ground::Floor => ' ',
+                })
+                .collect()
+        })
+        .collect();
+    for c in &m.chambers {
+        rows[c.cy as usize][c.cx as usize] = if c.home.is_some() { 'H' } else { '+' };
+    }
+    for n in &m.nodes {
+        let (x, y) = n.pos.cell();
+        rows[y as usize][x as usize] = if n.cache {
+            '$'
+        } else {
+            match n.resource {
+                Resource::Food => 'F',
+                Resource::Nectar => 'N',
+                Resource::Leaves => 'L',
+            }
+        };
+    }
+    eprintln!("MAP {} {}", m.w, m.h);
+    for r in rows {
+        eprintln!("{}", r.into_iter().collect::<String>());
+    }
+}
+
+/// Map generation time per Map Type, Format and Map Size, in release:
+/// `cargo test --release -p tool_core --test ai -- --ignored --nocapture
+/// map_generation_time`. Every map must take well under 50 ms.
+#[test]
+#[ignore]
+fn map_generation_time() {
+    use tool_core::settings::{Format, Level};
+    for map_type in [MapType::Tunnels, MapType::Open, MapType::Maze] {
+        for format in [Format::OneVOne, Format::FreeForAll] {
+            for map_size in [Level::Normal, Level::High] {
+                let s = MatchSettings {
+                    format,
+                    map_size,
+                    map_type,
+                    ..MatchSettings::default()
+                };
+                let mut worst = 0u128;
+                let mut total = 0u128;
+                for seed in 0..10 {
+                    let t0 = std::time::Instant::now();
+                    let m = tool_core::map::generate(seed, &s);
+                    let us = t0.elapsed().as_micros();
+                    assert!(m.w > 0);
+                    worst = worst.max(us);
+                    total += us;
+                }
+                eprintln!(
+                    "map {map_type:?} {format:?} {map_size:?}: mean {} us, worst {worst} us",
+                    total / 10
+                );
+                assert!(
+                    worst < 50_000,
+                    "{map_type:?} {format:?} {map_size:?}: {worst} us"
+                );
+            }
+        }
     }
 }
