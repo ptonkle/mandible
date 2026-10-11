@@ -6,4 +6,5 @@ One row per concrete change. Say what you did, what you expected, and what happe
 
 | # | What I did | Expected | What happened | Change wanted | Status |
 | --- | --- | --- | --- | --- | --- |
-| 1 | | | | | |
+| 1 | Clicked the grid tab headers (Ants, Build, Waypoints, …) | The tab opens on every click | It does not open reliably | Tab clicks always work. *Agent's likely cause: the HUD is rebuilt about 10 times a second, so a button replaced between mouse-down and mouse-up never receives the click. Grid buttons and queue icons are probably affected too.* | open |
+| 2 | — | — | — | A sandbox mode. *Details to decide: for example unlimited resources, every tier unlocked, spawning ants for any colony, a passive or no opponent, and pause or speed control.* | open |
