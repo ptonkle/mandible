@@ -4,14 +4,15 @@
 //!
 //!     cargo test --release -p tool_core --test ai -- --ignored --nocapture
 
+use tool_core::rules::TICKS_PER_SECOND;
 use tool_core::settings::{Difficulty, MatchSettings, SeatKind};
 use tool_core::world::World;
 
 /// 20 minutes of game time: no match should get near it.
-const LIMIT: i32 = 12_000;
-/// Matches are designed to last about 5 minutes (3,000 ticks); half of them
-/// must be over within 10.
-const MEDIAN_LIMIT: i32 = 6_000;
+const LIMIT: i32 = 20 * 60 * TICKS_PER_SECOND;
+/// Matches are designed to last about 5 minutes; half of them must be over
+/// within 10.
+const MEDIAN_LIMIT: i32 = 10 * 60 * TICKS_PER_SECOND;
 
 /// Plays one match; returns the winning seat (or None) and the tick it ended.
 fn play(seed: u64, a: Difficulty, b: Difficulty) -> (Option<u8>, i32) {
@@ -68,6 +69,12 @@ fn imago_beats_pupa_and_pupa_beats_larva() {
             t.iter().all(|&x| x < LIMIT),
             "{name}: a match reached the limit: {l:?}"
         );
+        let median = t[t.len() / 2];
+        eprintln!(
+            "AI: {name} median {median} ticks = {}:{:02}",
+            median / TICKS_PER_SECOND / 60,
+            median / TICKS_PER_SECOND % 60
+        );
         assert!(
             t[t.len() / 2] <= MEDIAN_LIMIT,
             "{name}: median length {} over {MEDIAN_LIMIT}",
@@ -94,7 +101,7 @@ fn trace() {
     let every: i32 = std::env::var("EVERY")
         .ok()
         .and_then(|s| s.parse().ok())
-        .unwrap_or(600);
+        .unwrap_or(60 * TICKS_PER_SECOND);
     let mut w = World::new(
         seed,
         MatchSettings::default(),
@@ -105,7 +112,7 @@ fn trace() {
         let (a, b) = s.split_once('-')?;
         Some((a.parse().ok()?, b.parse().ok()?))
     });
-    while w.winner.is_none() && w.tick < 9000 {
+    while w.winner.is_none() && w.tick < 15 * 60 * TICKS_PER_SECOND {
         if let Some((from, to)) = debug {
             let d = diff("A");
             if (from..to).contains(&(w.tick + 1)) && tool_core::ai::due(w.tick + 1, 0, d) {
@@ -284,7 +291,7 @@ fn duel() {
         )
     };
     w.step(&[charge(0, 5), charge(1, -5)], &[]);
-    while w.tick < 1500 && alive(&w, 0).0 > 0 && alive(&w, 1).0 > 0 {
+    while w.tick < 150 * TICKS_PER_SECOND && alive(&w, 0).0 > 0 && alive(&w, 1).0 > 0 {
         w.step(&[], &[]);
     }
     eprintln!("t{} X {:?} Y {:?}", w.tick, alive(&w, 0), alive(&w, 1));

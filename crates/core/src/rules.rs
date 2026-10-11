@@ -2,19 +2,37 @@
 //! game plays by lives here. On-screen names live in `data/strings.json`,
 //! keyed by the `key()` of each item; the glossary guard checks them.
 //!
-//! Units: ticks (10 per second at Normal Game Speed), sub-units (`CELL` per
-//! cell) and whole resources.
+//! Units: ticks (`TICKS_PER_SECOND` per second at Normal Game Speed),
+//! sub-units (`CELL` per cell) and whole resources. Durations are written as
+//! `ticks(tenths of a second)`, so they keep their real-time meaning if the
+//! tick rate changes.
 
 use serde::{Deserialize, Serialize};
 
 use crate::fixed::CELL;
 
-pub const TICKS_PER_SECOND: i32 = 10;
+/// 20 ticks per second (50 ms at Normal Game Speed): ants step at most
+/// about two thirds of a cell per tick even at top speed, so a one-cell wall
+/// can never be stepped over.
+pub const TICKS_PER_SECOND: i32 = 20;
 pub const POP_CAP: i32 = 300;
 pub const SATURATION: usize = 8;
 pub const WAYPOINTS_PER_SPECIES: usize = 4;
-pub const WALL_MAX_CELLS: i32 = 12;
+/// The longest wall line one drag can place; cost (6 Leaves a cell) is the
+/// real limit.
+pub const WALL_MAX_CELLS: i32 = 64;
+/// A wall line is placed as blueprints of at most this many cells, so a
+/// long wall rises section by section. 8 cells cost 48 Leaves: one Carpenter
+/// Ant trip.
+pub const WALL_SECTION_CELLS: usize = 8;
 pub const MIN_DAMAGE: i32 = 1;
+/// A Human colony's stockpile in Sandbox, refilled every tick.
+pub const SANDBOX_STOCK: i32 = 99_999;
+
+/// Ticks for a duration given in tenths of a second.
+pub const fn ticks(tenths: i32) -> i32 {
+    tenths * TICKS_PER_SECOND / 10
+}
 
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default,
@@ -127,7 +145,8 @@ pub struct Stats {
     pub attack_ticks: i32,
     /// Reach beyond touching, in sub-units.
     pub range: i32,
-    /// Sub-units per tick.
+    /// Sub-units per tick. At 20 ticks per second a speed of 77 is about
+    /// 6 cells a second.
     pub speed: i32,
     /// Body radius in sub-units.
     pub radius: i32,
@@ -137,7 +156,7 @@ pub struct Stats {
     pub splash: i32,
     pub heal: i32,
     pub carry: i32,
-    /// Ticks to gather one resource.
+    /// Ticks to gather one resource (after `Ranks::apply`: tenths of a tick).
     pub gather_ticks: i32,
     /// Move Speed while laden, as a percentage.
     pub laden_pct: i32,
@@ -151,11 +170,11 @@ const BASE: Stats = Stats {
     tier: 1,
     cost: [50, 0, 0],
     pop: 1,
-    train_ticks: 80,
+    train_ticks: ticks(80),
     health: 40,
     armor: 0,
     damage: 0,
-    attack_ticks: 10,
+    attack_ticks: ticks(10),
     range: 48,
     speed: 77,
     radius: 112,
@@ -237,31 +256,31 @@ impl Species {
             Species::Harvester => Stats {
                 role: Role::Gatherer,
                 cost: [50, 0, 0],
-                train_ticks: 70,
+                train_ticks: ticks(70),
                 health: 25,
                 speed: 82,
                 vision: 6,
                 carry: 10,
-                gather_ticks: 3,
+                gather_ticks: ticks(3),
                 laden_pct: 85,
                 ..BASE
             },
             Species::Soldier => Stats {
                 role: Role::Melee,
                 cost: [55, 0, 0],
-                train_ticks: 80,
+                train_ticks: ticks(80),
                 health: 45,
                 damage: 6,
-                attack_ticks: 10,
+                attack_ticks: ticks(10),
                 ..BASE
             },
             Species::Carpenter => Stats {
                 role: Role::Builder,
                 cost: [50, 0, 10],
-                train_ticks: 90,
+                train_ticks: ticks(90),
                 health: 30,
                 vision: 6,
-                carry: 20,
+                carry: 50,
                 laden_pct: 75,
                 build: 1,
                 ..BASE
@@ -270,12 +289,12 @@ impl Species {
                 role: Role::Gatherer,
                 tier: 2,
                 cost: [50, 20, 0],
-                train_ticks: 80,
+                train_ticks: ticks(80),
                 health: 30,
                 speed: 77,
                 vision: 6,
                 carry: 20,
-                gather_ticks: 2,
+                gather_ticks: ticks(2),
                 laden_pct: 90,
                 only_gathers: Some(Resource::Leaves),
                 ..BASE
@@ -284,10 +303,10 @@ impl Species {
                 role: Role::Melee,
                 tier: 2,
                 cost: [40, 10, 0],
-                train_ticks: 50,
+                train_ticks: ticks(50),
                 health: 25,
                 damage: 4,
-                attack_ticks: 6,
+                attack_ticks: ticks(6),
                 speed: 133,
                 radius: 96,
                 ..BASE
@@ -297,11 +316,11 @@ impl Species {
                 tier: 2,
                 cost: [70, 30, 0],
                 pop: 2,
-                train_ticks: 120,
+                train_ticks: ticks(120),
                 health: 110,
                 armor: 4,
                 damage: 4,
-                attack_ticks: 12,
+                attack_ticks: ticks(12),
                 speed: 51,
                 radius: 144,
                 vision: 6,
@@ -312,10 +331,10 @@ impl Species {
                 tier: 2,
                 cost: [50, 40, 0],
                 pop: 2,
-                train_ticks: 110,
+                train_ticks: ticks(110),
                 health: 30,
                 damage: 9,
-                attack_ticks: 14,
+                attack_ticks: ticks(14),
                 range: 5 * CELL,
                 speed: 72,
                 vision: 8,
@@ -326,9 +345,9 @@ impl Species {
                 tier: 2,
                 cost: [40, 50, 0],
                 pop: 2,
-                train_ticks: 110,
+                train_ticks: ticks(110),
                 health: 35,
-                attack_ticks: 10,
+                attack_ticks: ticks(10),
                 range: 3 * CELL,
                 heal: 4,
                 ..BASE
@@ -338,10 +357,10 @@ impl Species {
                 tier: 3,
                 cost: [60, 60, 0],
                 pop: 2,
-                train_ticks: 130,
+                train_ticks: ticks(130),
                 health: 45,
                 damage: 7,
-                attack_ticks: 10,
+                attack_ticks: ticks(10),
                 speed: 108,
                 vision: 10,
                 ..BASE
@@ -351,10 +370,10 @@ impl Species {
                 tier: 3,
                 cost: [50, 50, 0],
                 pop: 2,
-                train_ticks: 110,
+                train_ticks: ticks(110),
                 health: 30,
                 damage: 45,
-                attack_ticks: 10,
+                attack_ticks: ticks(10),
                 speed: 97,
                 vision: 6,
                 splash: 2 * CELL + CELL / 2,
@@ -365,11 +384,11 @@ impl Species {
                 tier: 3,
                 cost: [80, 60, 0],
                 pop: 3,
-                train_ticks: 150,
+                train_ticks: ticks(150),
                 health: 85,
                 armor: 2,
                 damage: 18,
-                attack_ticks: 14,
+                attack_ticks: ticks(14),
                 speed: 82,
                 radius: 128,
                 ..BASE
@@ -379,11 +398,11 @@ impl Species {
                 tier: 3,
                 cost: [150, 120, 0],
                 pop: 5,
-                train_ticks: 220,
+                train_ticks: ticks(220),
                 health: 320,
                 armor: 4,
                 damage: 14,
-                attack_ticks: 16,
+                attack_ticks: ticks(16),
                 range: 64,
                 speed: 46,
                 radius: 300,
@@ -452,7 +471,7 @@ impl StructureKind {
             StructureKind::Queen => StructureStats {
                 cost: [250, 50, 200],
                 health: 1500,
-                work: 450,
+                work: ticks(450),
                 housing: 20,
                 vision: 10,
                 radius: 2 * CELL + CELL / 2,
@@ -461,7 +480,7 @@ impl StructureKind {
             StructureKind::BroodCell => StructureStats {
                 cost: [0, 0, 60],
                 health: 300,
-                work: 100,
+                work: ticks(100),
                 housing: 15,
                 vision: 6,
                 radius: CELL + CELL / 4,
@@ -470,7 +489,7 @@ impl StructureKind {
             StructureKind::Wall => StructureStats {
                 cost: [0, 0, 6],
                 health: 150,
-                work: 15,
+                work: ticks(15),
                 housing: 0,
                 vision: 3,
                 radius: CELL / 2,
@@ -481,7 +500,7 @@ impl StructureKind {
                 StructureStats {
                     cost: if t3 { [150, 80, 150] } else { [120, 0, 100] },
                     health: 600,
-                    work: if t3 { 300 } else { 200 },
+                    work: ticks(if t3 { 300 } else { 200 }),
                     housing: 0,
                     vision: 7,
                     radius: 2 * CELL,
@@ -573,7 +592,7 @@ impl Upgrade {
     }
 
     pub fn research_ticks(self, rank: u8) -> i32 {
-        (150 + 100 * rank as i32).min(400)
+        ticks((150 + 100 * rank as i32).min(400))
     }
 
     /// Hatchery species upgrades are researched at that species' hatchery;
@@ -589,8 +608,8 @@ impl Upgrade {
 /// Cost and duration of evolving to `tier`.
 pub fn evolve_cost(tier: u8) -> (Cost, i32) {
     match tier {
-        2 => ([300, 150, 0], 200),
-        _ => ([500, 300, 100], 300),
+        2 => ([300, 150, 0], ticks(200)),
+        _ => ([500, 300, 100], ticks(300)),
     }
 }
 
@@ -649,7 +668,9 @@ impl Ranks {
             st.gather_ticks *= 10;
         }
         if st.carry > 0 {
-            st.carry += 3 * self.carry_capacity as i32;
+            // +30% per rank: Harvester Ant 10 -> 13 -> 16, Carpenter Ant
+            // 50 -> 65 -> 80.
+            st.carry += st.carry * 3 * self.carry_capacity as i32 / 10;
         }
         if st.build > 0 {
             st.build *= 2 + self.build_rate as i32;

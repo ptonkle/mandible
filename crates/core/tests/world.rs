@@ -2,7 +2,7 @@
 //! the rules by hand, never copied from the simulation's own output.
 
 use tool_core::fixed::{Pos, CELL};
-use tool_core::rules::{Species, StructureKind, Upgrade};
+use tool_core::rules::{ticks, Species, StructureKind, Upgrade};
 use tool_core::settings::{Difficulty, Format, MatchSettings, SeatKind};
 use tool_core::world::{Amount, Command, Focus, Job, World};
 
@@ -86,7 +86,7 @@ fn a_snapshot_continues_exactly_like_the_original() {
 fn harvesters_fill_their_inventory_and_deliver_to_the_queen() {
     let mut w = world(1);
     let before = w.colonies[0].stock;
-    run(&mut w, 400);
+    run(&mut w, ticks(400));
     let after = w.colonies[0].stock;
     let gathered: i32 = w.colonies[0].tally.gathered.iter().sum();
     // Six Harvester Ants carry 10 each per trip; in 40 s they make several.
@@ -101,9 +101,9 @@ fn harvesters_fill_their_inventory_and_deliver_to_the_queen() {
 #[test]
 fn income_is_what_was_delivered_in_the_last_ten_seconds() {
     let mut w = world(2);
-    run(&mut w, 300);
+    run(&mut w, ticks(300));
     let g0 = w.colonies[0].tally.gathered;
-    run(&mut w, 100);
+    run(&mut w, ticks(100));
     let g1 = w.colonies[0].tally.gathered;
     let income = w.income_tenths(0);
     for r in 0..3 {
@@ -145,7 +145,7 @@ fn gather_focus_changes_the_split() {
             w.spawn_ant(0, Species::Harvester, h);
         }
         w.colonies[0].focus = focus;
-        run(&mut w, 30);
+        run(&mut w, ticks(30));
         let mut by = [0; 3];
         for a in &w.ants {
             if let Job::Gather(n) = a.job {
@@ -170,7 +170,7 @@ fn gather_focus_changes_the_split() {
 #[test]
 fn a_depleted_node_is_left() {
     let mut w = world(5);
-    run(&mut w, 50);
+    run(&mut w, ticks(50));
     let busy: Vec<u32> = w
         .ants
         .iter()
@@ -182,7 +182,7 @@ fn a_depleted_node_is_left() {
     let target = busy[0];
     let ni = w.nodes.iter().position(|n| n.id == target).unwrap();
     w.nodes[ni].amount = 0;
-    run(&mut w, 20);
+    run(&mut w, ticks(20));
     assert!(
         !w.ants.iter().any(|a| a.job == Job::Gather(target)),
         "nobody gathers at an empty node"
@@ -270,7 +270,7 @@ fn housing_full_pauses_training() {
             amount: Amount::One,
         },
     );
-    run(&mut w, 200);
+    run(&mut w, ticks(200));
     assert_eq!(w.population(0), 20, "no ant was trained past housing");
     assert_eq!(w.queued_pop(0), 1, "it waits in the queue");
 }
@@ -307,7 +307,7 @@ fn evolving_raises_the_tier_after_its_duration() {
     w.colonies[0].stock = [1000, 1000, 1000];
     w.apply(0, &Command::Evolve);
     assert_eq!(w.colonies[0].stock, [700, 850, 1000]);
-    run(&mut w, 199);
+    run(&mut w, ticks(200) - 1);
     assert_eq!(w.colonies[0].tier, 1);
     run(&mut w, 1);
     assert_eq!(w.colonies[0].tier, 2);
@@ -330,7 +330,7 @@ fn a_rank_two_upgrade_needs_tier_two() {
         },
     );
     assert_eq!(r, Err(tool_core::world::Refusal::AlreadyQueued));
-    run(&mut w, 260);
+    run(&mut w, ticks(260));
     assert_eq!(w.colonies[0].ranks.armor, 1);
     let r = w.try_apply(
         0,
@@ -370,7 +370,7 @@ fn a_blueprint_is_built_only_after_its_cost_is_carried_to_it() {
     let s = w.structures.iter().find(|s| s.id == id).unwrap();
     assert_eq!(s.delivered, [0, 0, 0]);
     let mut seen_delivered_before_work = false;
-    for _ in 0..600 {
+    for _ in 0..ticks(600) {
         w.step(&[], &[]);
         if let Some(s) = w.structures.iter().find(|s| s.id == id) {
             if s.work_done > 0 {
@@ -425,7 +425,7 @@ fn a_finished_wall_closes_its_cells_to_enemies() {
         .expect("wall blueprint");
     assert_eq!(bp.cells.len(), 7);
     assert_eq!(bp.cost, [0, 0, 42]);
-    run(&mut w, 900);
+    run(&mut w, ticks(900));
     let walls = w
         .structures
         .iter()
@@ -445,7 +445,7 @@ fn armor_is_flat_in_a_real_fight() {
     put(&mut w, 1, Species::Turtle, near(h, 3, 0));
     let turtle = w.ants[1].id;
     let start = w.ants[1].health;
-    run(&mut w, 25);
+    run(&mut w, ticks(25));
     let t = w.ants.iter().find(|a| a.id == turtle).unwrap();
     let lost = start - t.health;
     assert!(lost > 0 && lost % 2 == 0, "lost {lost}: whole bites of 2");
@@ -466,7 +466,7 @@ fn splash_hits_every_enemy_in_its_radius() {
         .filter(|a| a.colony == 1)
         .map(|a| a.id)
         .collect();
-    run(&mut w, 30);
+    run(&mut w, ticks(30));
     // 45 damage clears 45 health: every Soldier Ant in the blast dies, and
     // the Exploding Ant spends itself.
     assert!(
@@ -513,7 +513,7 @@ fn waypoints_split_a_species_evenly() {
     }
     let wps = w.colonies[0].waypoints[Species::Soldier.index()].clone();
     assert_eq!(wps.len(), 3);
-    run(&mut w, 200);
+    run(&mut w, ticks(200));
     let mut at = [0; 3];
     for a in &w.ants {
         let k = (0..3).min_by_key(|k| a.pos.dist2(wps[*k])).unwrap();
@@ -559,17 +559,17 @@ fn retreat_pulls_ants_home_and_releasing_sends_them_back() {
         },
     );
     let centre = Pos::of_cell(cx, cy);
-    run(&mut w, 400);
+    run(&mut w, ticks(400));
     let far = w.ants.iter().map(|a| a.pos.dist(h)).min().unwrap();
     assert!(far > 20 * CELL, "they reached the centre");
     w.apply(0, &Command::Retreat { on: true });
-    run(&mut w, 400);
+    run(&mut w, ticks(400));
     assert!(
         w.ants.iter().all(|a| a.pos.dist(h) < 10 * CELL),
         "they came home"
     );
     w.apply(0, &Command::Retreat { on: false });
-    run(&mut w, 400);
+    run(&mut w, ticks(400));
     assert!(
         w.ants.iter().all(|a| a.pos.dist(centre) < 8 * CELL),
         "and went back"
@@ -675,7 +675,7 @@ fn digging_opens_dirt() {
         .find(|(a, b)| w.map.is_floor(*a, *b));
     if let Some((bx, by)) = beside {
         w.ants[0].pos = Pos::of_cell(bx, by);
-        run(&mut w, 120);
+        run(&mut w, ticks(120));
         assert_eq!(w.map.at(x, y), tool_core::map::Ground::Floor, "dug through");
     }
 }
@@ -740,4 +740,390 @@ fn a_plain_waypoint_replaces_and_shift_adds() {
     assert_eq!(w.colonies[0].waypoints[Species::Soldier.index()].len(), 1);
     set(&mut w, 6, true);
     assert_eq!(w.colonies[0].waypoints[Species::Soldier.index()].len(), 2);
+}
+
+// ---- TRIAGE rows 12, 26, 10: carrying, expansions and long walls ----
+
+/// Runs until every blueprint in `ids` is complete (or `limit` ticks) and
+/// checks every Carpenter Ant trip: from taking Leaves at the queen to
+/// handing them in, the ant walked at least half a cell and took at least
+/// two ticks. Returns the number of trips.
+fn trips_walk(w: &mut World, ids: &[u32], limit: i32) -> usize {
+    use std::collections::BTreeMap;
+    let mut start: BTreeMap<u32, (Pos, i32)> = BTreeMap::new();
+    let mut trips = 0;
+    for _ in 0..limit {
+        let before: BTreeMap<u32, Job> = w.ants.iter().map(|a| (a.id, a.job)).collect();
+        w.step(&[], &[]);
+        for a in w.ants.iter().filter(|a| a.species == Species::Carpenter) {
+            match (before.get(&a.id).copied(), a.job) {
+                (Some(Job::Fetch(b)), Job::Haul(b2)) if b == b2 && ids.contains(&b) => {
+                    start.insert(a.id, (a.pos, w.tick));
+                }
+                (Some(Job::Haul(b)), j) if j != Job::Haul(b) && ids.contains(&b) => {
+                    if let Some((p, t)) = start.remove(&a.id) {
+                        let walked = a.pos.dist(p);
+                        assert!(
+                            walked >= CELL / 2 && w.tick - t >= 2,
+                            "Leaves handed in after {walked} sub-units and {} ticks",
+                            w.tick - t
+                        );
+                        trips += 1;
+                    }
+                }
+                _ => {}
+            }
+        }
+        if ids
+            .iter()
+            .all(|id| w.structures.iter().all(|s| s.id != *id || s.complete))
+        {
+            break;
+        }
+    }
+    trips
+}
+
+#[test]
+fn leaves_are_walked_to_a_wall_beside_the_queen() {
+    // TRIAGE row 12, worked by hand: seed 10, a 7-cell wall 6 cells from the
+    // queen. A queen hands Leaves over within 2.5 + 0.44 + 1 = 3.94 cells
+    // of its centre; a wall takes them within 0.5 + 0.44 + 0.5 = 1.44 cells
+    // of its nearest cell's centre, so at least 0.6 cells lie between.
+    let mut w = world(10);
+    let (hx, hy) = home(&w, 0).cell();
+    w.colonies[0].stock = [0, 0, 500];
+    w.apply(
+        0,
+        &Command::Place {
+            kind: StructureKind::Wall,
+            x: hx + 6,
+            y: hy - 3,
+            x2: hx + 6,
+            y2: hy + 3,
+        },
+    );
+    let ids: Vec<u32> = w
+        .structures
+        .iter()
+        .filter(|s| !s.complete)
+        .map(|s| s.id)
+        .collect();
+    assert_eq!(ids.len(), 1, "7 cells: one section");
+    let trips = trips_walk(&mut w, &ids, ticks(900));
+    assert!(trips >= 1, "the Leaves were carried ({trips} trips)");
+    let walls = w
+        .structures
+        .iter()
+        .filter(|s| s.kind == StructureKind::Wall && s.complete)
+        .count();
+    assert_eq!(walls, 7);
+}
+
+#[test]
+fn leaves_are_walked_to_every_kind_placed_close_to_the_queen() {
+    for kind in [
+        StructureKind::BroodCell,
+        StructureKind::Hatchery(Species::Fire),
+        StructureKind::Hatchery(Species::Dinosaur),
+    ] {
+        let mut w = world(10);
+        w.colonies[0].tier = 3;
+        w.colonies[0].stock = [1000, 1000, 1000];
+        // The closest spot placement allows.
+        let h = home(&w, 0);
+        let (x, y) = tool_core::ai::find_spot(&w, 0, kind, h, 1).expect("a spot");
+        w.apply(
+            0,
+            &Command::Place {
+                kind,
+                x,
+                y,
+                x2: x,
+                y2: y,
+            },
+        );
+        let id = w.structures.iter().rfind(|s| !s.complete).unwrap().id;
+        let trips = trips_walk(&mut w, &[id], ticks(1200));
+        assert!(trips >= 1, "{kind:?}: {trips} trips");
+        assert!(
+            w.structures.iter().any(|s| s.id == id && s.complete),
+            "{kind:?} was built"
+        );
+    }
+}
+
+#[test]
+fn only_leaves_are_carried_and_a_carpenter_carries_fifty() {
+    // TRIAGE row 26: a Fire Ant Hatchery costs 120 Food and 100 Leaves. The
+    // Food leaves the stockpile and counts as delivered at placement; the
+    // 100 Leaves take two trips of 50.
+    let mut w = world(10);
+    w.colonies[0].tier = 2;
+    w.colonies[0].stock = [1000, 1000, 1000];
+    let id = place_near_home(&mut w, StructureKind::Hatchery(Species::Fire));
+    assert_eq!(w.colonies[0].stock, [880, 1000, 900]);
+    let s = w.structures.iter().find(|s| s.id == id).unwrap();
+    assert_eq!(s.delivered, [120, 0, 0]);
+    assert_eq!(s.still_needed(), [0, 0, 100]);
+    let mut loads = Vec::new();
+    for _ in 0..ticks(300) {
+        let before: Vec<(u32, Job)> = w.ants.iter().map(|a| (a.id, a.job)).collect();
+        w.step(&[], &[]);
+        for a in &w.ants {
+            if a.job == Job::Haul(id) && before.contains(&(a.id, Job::Fetch(id))) {
+                loads.push(a.inventory);
+            }
+        }
+    }
+    assert_eq!(loads, vec![[0, 0, 50], [0, 0, 50]]);
+    // Carry Capacity I: +30%, 65.
+    w.colonies[0].ranks.carry_capacity = 1;
+    assert_eq!(w.colonies[0].ranks.apply(Species::Carpenter).carry, 65);
+}
+
+/// A row of `n` cells where a wall line fits whole, for seat 0.
+fn open_row(w: &World, n: i32) -> (i32, i32) {
+    for y in 0..w.map.h {
+        for x in 0..w.map.w - n {
+            if w.wall_plan(0, x, y, x + n - 1, y).len() == n as usize {
+                return (x, y);
+            }
+        }
+    }
+    panic!("no open row of {n}");
+}
+
+#[test]
+fn a_long_wall_skips_rock_and_rises_in_sections() {
+    // TRIAGE row 10: a 30-cell line (the old limit was 12) with 3 cells of
+    // rock in it: 27 cells at 6 Leaves = 162, split into runs of 13 and 14,
+    // and those into sections of at most 8: 8 + 5 and 8 + 6.
+    let mut w = arena(10);
+    let n = w.map.w * w.map.h;
+    w.explored[0].set_all(n as usize);
+    let (x, y) = open_row(&w, 30);
+    for dx in 13..16 {
+        let i = w.map.idx(x + dx, y);
+        w.map.ground[i] = tool_core::map::Ground::Rock;
+    }
+    let h = home(&w, 0);
+    for _ in 0..6 {
+        w.spawn_ant(0, Species::Carpenter, h);
+    }
+    w.colonies[0].stock = [0, 0, 1000];
+    w.apply(
+        0,
+        &Command::Place {
+            kind: StructureKind::Wall,
+            x,
+            y,
+            x2: x + 29,
+            y2: y,
+        },
+    );
+    assert_eq!(w.colonies[0].stock[2], 1000 - 162);
+    let mut sizes: Vec<usize> = w
+        .structures
+        .iter()
+        .filter(|s| !s.complete)
+        .map(|s| s.cells.len())
+        .collect();
+    sizes.sort();
+    assert_eq!(sizes, vec![5, 6, 8, 8]);
+    let mut part_built = false;
+    for _ in 0..ticks(3000) {
+        w.step(&[], &[]);
+        let built = w
+            .structures
+            .iter()
+            .filter(|s| s.kind == StructureKind::Wall && s.complete)
+            .count();
+        let waiting = w.structures.iter().any(|s| !s.complete);
+        part_built |= built > 0 && waiting;
+        if !waiting {
+            break;
+        }
+    }
+    assert!(part_built, "some sections stood before the others");
+    let built = w
+        .structures
+        .iter()
+        .filter(|s| s.kind == StructureKind::Wall && s.complete)
+        .count();
+    assert_eq!(built, 27);
+}
+
+// ---- TRIAGE row 9: Auto-Scout ----
+
+#[test]
+fn auto_scout_sends_one_fire_ant_to_unseen_chambers() {
+    let mut w = arena(30);
+    let h = home(&w, 0);
+    let soldier = w.spawn_ant(0, Species::Soldier, h);
+    let fire1 = w.spawn_ant(0, Species::Fire, h);
+    let fire2 = w.spawn_ant(0, Species::Fire, h);
+    w.apply(0, &Command::Retreat { on: true });
+    let seen = |w: &World| w.team_sighted(0).count();
+    let seen0 = seen(&w);
+    w.apply(0, &Command::AutoScout { on: true });
+    w.step(&[], &[]);
+    assert_eq!(w.colonies[0].scout, Some(fire1), "the lowest-id Fire Ant");
+    run(&mut w, ticks(300));
+    let scout = w.ants.iter().find(|a| a.id == fire1).expect("alive");
+    assert!(scout.pos.dist(h) > 15 * CELL, "the scout left home");
+    for id in [soldier, fire2] {
+        let a = w.ants.iter().find(|a| a.id == id).unwrap();
+        assert!(a.pos.dist(h) < 10 * CELL, "Retreat keeps the rest home");
+    }
+    assert!(seen(&w) > seen0 * 2, "{} vs {seen0} cells seen", seen(&w));
+    // The scout dies: the other Fire Ant takes over.
+    w.ants.retain(|a| a.id != fire1);
+    w.step(&[], &[]);
+    assert_eq!(w.colonies[0].scout, Some(fire2));
+    w.apply(0, &Command::AutoScout { on: false });
+    w.step(&[], &[]);
+    assert_eq!(w.colonies[0].scout, None);
+}
+
+#[test]
+fn the_scout_does_not_fight() {
+    // An enemy Turtle Ant stands beside the scout: it walks on without
+    // biting (a Fire Ant would hit it every 0.6 s).
+    let mut w = arena(30);
+    let h = home(&w, 0);
+    let fire = put(&mut w, 0, Species::Fire, h);
+    let enemy = put(&mut w, 1, Species::Turtle, near(h, 1, 0));
+    let full = w.ants.iter().find(|a| a.id == enemy).unwrap().health;
+    w.apply(0, &Command::AutoScout { on: true });
+    run(&mut w, ticks(20));
+    let e = w.ants.iter().find(|a| a.id == enemy).unwrap();
+    assert_eq!(e.health, full, "the scout never attacked");
+    let s = w.ants.iter().find(|a| a.id == fire);
+    assert!(s.is_none_or(|s| s.pos.dist(h) > 3 * CELL), "it moved on");
+}
+
+#[test]
+fn auto_scout_takes_a_soldier_without_fire_ants_and_stays_deterministic() {
+    let mut a = world(31);
+    a.apply(0, &Command::AutoScout { on: true });
+    a.step(&[], &[]);
+    let soldiers: Vec<u32> = a
+        .ants
+        .iter()
+        .filter(|x| x.colony == 0 && x.species == Species::Soldier)
+        .map(|x| x.id)
+        .collect();
+    assert_eq!(a.colonies[0].scout, soldiers.first().copied());
+    let mut b = World::restore(&a.snapshot()).unwrap();
+    for t in 0..ticks(300) {
+        a.step(&[], &[]);
+        b.step(&[], &[]);
+        assert_eq!(a.checksum(), b.checksum(), "diverged at {t}");
+    }
+    assert_eq!(a.colonies[0].scout_goal, b.colonies[0].scout_goal);
+}
+
+// ---- TRIAGE row 15: Map Revealed ----
+
+#[test]
+fn map_revealed_explores_everything_but_shows_only_line_of_sight() {
+    let s = MatchSettings {
+        map_revealed: true,
+        ..MatchSettings::default()
+    };
+    let w = World::new(32, s, &humans(2));
+    let n = (w.map.w * w.map.h) as u32;
+    for c in 0..2u8 {
+        assert_eq!(w.explored[c as usize].count(), n, "seat {c} explored");
+        assert!(w.visible[c as usize].count() < n / 4, "seat {c} visible");
+        let enemy = home(&w, 1 - c as usize).cell();
+        assert!(!w.team_visible(c).get(w.map.idx(enemy.0, enemy.1)));
+        assert!(!w.team_sighted(c).get(w.map.idx(enemy.0, enemy.1)));
+    }
+    let plain = world(32);
+    assert!(plain.explored[0].count() < n / 4);
+}
+
+#[test]
+fn with_map_revealed_the_ai_does_not_scout() {
+    // Pupa sends Soldier Ants to the nearest unexplored chamber from 25 s;
+    // with the map revealed there is none.
+    let scouted = |revealed: bool| {
+        let s = MatchSettings {
+            map_revealed: revealed,
+            ..MatchSettings::default()
+        };
+        let mut w = World::new(33, s, &[SeatKind::Ai(Difficulty::Pupa), SeatKind::Human]);
+        run(&mut w, ticks(400));
+        !w.colonies[0].waypoints[Species::Soldier.index()].is_empty()
+    };
+    assert!(scouted(false));
+    assert!(!scouted(true));
+}
+
+// ---- TRIAGE row 2: Sandbox ----
+
+#[test]
+fn sandbox_gives_humans_tier_three_and_unlimited_resources() {
+    use tool_core::rules::SANDBOX_STOCK;
+    let s = MatchSettings {
+        sandbox: true,
+        ..MatchSettings::default()
+    };
+    let mut w = World::new(34, s, &[SeatKind::Human, SeatKind::Ai(Difficulty::Pupa)]);
+    assert_eq!(w.colonies[0].tier, 3);
+    assert_eq!(w.colonies[0].stock, [SANDBOX_STOCK; 3]);
+    assert_eq!(w.colonies[1].tier, 1);
+    assert_eq!(w.colonies[1].stock, [300, 100, 200]);
+    w.step(
+        &[(
+            0,
+            Command::Train {
+                species: Species::Soldier,
+                amount: Amount::Ten,
+            },
+        )],
+        &[],
+    );
+    let queued: usize = w
+        .structures
+        .iter()
+        .filter(|s| s.colony == 0)
+        .map(|s| s.lane.len())
+        .sum();
+    assert_eq!(queued, 10, "queueing works the same");
+    assert_eq!(w.colonies[0].stock, [SANDBOX_STOCK; 3], "refilled");
+}
+
+// ---- TRIAGE row 24: twice the speed ----
+
+#[test]
+fn ants_walk_twice_as_fast_and_durations_keep_their_real_time() {
+    use tool_core::rules::TICKS_PER_SECOND;
+    // A Soldier Ant moved 77 sub-units a tick at 10 ticks a second, 3 cells
+    // a second; now 6 (77 x 20 / 256).
+    let st = Species::Soldier.stats();
+    assert_eq!(st.speed * TICKS_PER_SECOND / CELL, 6);
+    // A Soldier Ant still trains in 8 s.
+    assert_eq!(st.train_ticks, 8 * TICKS_PER_SECOND);
+    // Walked for real: 4 s along open floor covers about 24 cells.
+    let mut w = arena(35);
+    let n = w.map.w * w.map.h;
+    w.explored[0].set_all(n as usize);
+    let (x, y) = open_row(&w, 30);
+    let id = put(&mut w, 0, Species::Soldier, Pos::of_cell(x, y));
+    w.apply(
+        0,
+        &Command::SetWaypoint {
+            species: Some(Species::Soldier),
+            x: x + 29,
+            y,
+            add: false,
+        },
+    );
+    run(&mut w, 4 * TICKS_PER_SECOND);
+    let a = w.ants.iter().find(|a| a.id == id).unwrap();
+    let cells = a.pos.dist(Pos::of_cell(x, y)) / CELL;
+    assert!((20..=25).contains(&cells), "walked {cells} cells in 4 s");
 }

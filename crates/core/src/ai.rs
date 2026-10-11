@@ -20,7 +20,9 @@
 use serde::{Deserialize, Serialize};
 
 use crate::fixed::{Pos, CELL};
-use crate::rules::{evolve_cost, Resource, Species, StructureKind, Upgrade, POP_CAP};
+use crate::rules::{
+    evolve_cost, ticks, Resource, Species, StructureKind, Upgrade, POP_CAP, TICKS_PER_SECOND,
+};
 use crate::settings::Difficulty;
 use crate::world::{Amount, Command, Focus, Work, World};
 
@@ -31,12 +33,19 @@ pub struct AiState {
     pub retreat_until: i32,
 }
 
+/// Ticks between decisions.
 pub fn interval(d: Difficulty) -> i32 {
-    match d {
+    ticks(match d {
         Difficulty::Larva => 30,
         Difficulty::Pupa => 14,
         Difficulty::Imago => 6,
-    }
+    })
+}
+
+/// Match time in tenths of a second: every timing in the AI's plan is
+/// written in these, so it keeps its meaning whatever the tick rate.
+fn tenths(w: &World) -> i32 {
+    w.tick * 10 / TICKS_PER_SECOND
 }
 
 pub fn due(tick: i32, colony: usize, d: Difficulty) -> bool {
@@ -254,7 +263,9 @@ fn attack_point(w: &World, colony: u8) -> Option<Pos> {
         .first()
         .copied()
         .unwrap_or(from);
-    let explored = w.team_explored(colony);
+    // With Map Revealed every cell is Explored; what the team has really
+    // seen is what counts.
+    let explored = w.team_sighted(colony);
     let visible = w.team_visible(colony);
     let enemy = |c: u8| !w.allied(c, colony) && !w.colonies[c as usize].defeated;
     let nearest_to = |at: Pos, ps: Vec<Pos>| ps.into_iter().min_by_key(|p| (p.dist2(at), p.x, p.y));
@@ -321,24 +332,82 @@ fn attack_point(w: &World, colony: u8) -> Option<Pos> {
     // Hunting: an enemy is alive but nowhere known. Search chambers nobody
     // on the team has seen, nearest first; then sweep the chambers out of
     // sight, one after another.
+    if let Some(&i) = unseen_chambers(w, colony, from).first() {
+        let ch = &w.map.chambers[i];
+        return Some(Pos::of_cell(ch.cx, ch.cy));
+    }
+    // Every chamber has been seen and nothing is in sight: sweep.
+    None
+}
+
+/// Chambers nobody on the team has had in sight, except the team's own
+/// home chambers, nearest `from` first.
+pub fn unseen_chambers(w: &World, colony: u8, from: Pos) -> Vec<usize> {
     let my_team = w.colonies[colony as usize].team;
-    let unseen: Vec<Pos> = w
+    let seen = w.team_sighted(colony);
+    let mut v: Vec<(i64, usize)> = w
         .map
         .chambers
         .iter()
-        .filter(|ch| {
+        .enumerate()
+        .filter(|(_, ch)| {
             ch.home
                 .map(|h| w.colonies[h as usize].team != my_team)
                 .unwrap_or(true)
         })
-        .filter(|ch| !explored.get(w.map.idx(ch.cx, ch.cy)))
-        .map(|ch| Pos::of_cell(ch.cx, ch.cy))
+        .filter(|(_, ch)| !seen.get(w.map.idx(ch.cx, ch.cy)))
+        .map(|(i, ch)| (Pos::of_cell(ch.cx, ch.cy).dist2(from), i))
         .collect();
-    if let Some(p) = nearest(unseen) {
-        return Some(p);
+    v.sort();
+    v.into_iter().map(|(_, i)| i).collect()
+}
+
+/// Every chamber in a serpentine tour of the map, band by band (the order
+/// `sweep_tour` visits them in).
+fn chamber_tour(w: &World) -> Vec<usize> {
+    let band = 30;
+    let mut v: Vec<(i32, i32, i32, usize)> = w
+        .map
+        .chambers
+        .iter()
+        .enumerate()
+        .map(|(i, ch)| {
+            let b = ch.cy / band;
+            (b, if b % 2 == 0 { ch.cx } else { -ch.cx }, ch.cy, i)
+        })
+        .collect();
+    v.sort();
+    v.into_iter().map(|t| t.3).collect()
+}
+
+/// Where Auto-Scout's scout may go next, best first: chambers the team has
+/// never seen, nearest first; then, once every chamber has been seen, the
+/// chambers out of the team's sight, in tour order after `last`, so the
+/// scout keeps sweeping instead of going back and forth.
+pub fn scout_candidates(w: &World, colony: u8, from: Pos, last: Option<u32>) -> Vec<usize> {
+    let unseen = unseen_chambers(w, colony, from);
+    if !unseen.is_empty() {
+        return unseen;
     }
-    // Every chamber has been seen and nothing is in sight: sweep.
-    None
+    let my_team = w.colonies[colony as usize].team;
+    let tour = chamber_tour(w);
+    let n = tour.len();
+    let start = last
+        .and_then(|l| tour.iter().position(|&i| i as u32 == l))
+        .map(|k| k + 1)
+        .unwrap_or(0);
+    (0..n)
+        .map(|s| tour[(start + s) % n])
+        .filter(|&i| Some(i as u32) != last)
+        .filter(|&i| {
+            let ch = &w.map.chambers[i];
+            let own_home = ch
+                .home
+                .map(|h| w.colonies[h as usize].team == my_team)
+                .unwrap_or(false);
+            !own_home && !w.team_sees(colony, ch.cx, ch.cy)
+        })
+        .collect()
 }
 
 /// Every chamber centre and a sample of tunnel cells, in a serpentine tour
@@ -436,6 +505,7 @@ pub fn decide(w: &World, colony: u8, d: Difficulty) -> Vec<Command> {
     let ci = colony as usize;
     let c = &w.colonies[ci];
     let p = plan(d);
+    let now = tenths(w);
     let n = counts(w, colony);
     let queens: Vec<Pos> = w.queens(colony).map(|q| q.pos).collect();
     let home = queens.first().copied().unwrap_or_else(|| {
@@ -473,12 +543,12 @@ pub fn decide(w: &World, colony: u8, d: Difficulty) -> Vec<Command> {
     // The army a difficulty keeps at home before spending on anything else.
     let floor = match d {
         Difficulty::Larva => 0,
-        Difficulty::Pupa => w.tick / 100,
+        Difficulty::Pupa => now / 100,
         // Imago spends the opening on Harvester Ants, Tier 2 and its first
         // hatcheries, with a small guard of Soldier Ants; it trains in
         // earnest once the hatcheries stand.
-        Difficulty::Imago if hatcheries < 2 => ((w.tick - 600) / 120).clamp(0, 8),
-        Difficulty::Imago => ((w.tick - 900) / 70).max(0),
+        Difficulty::Imago if hatcheries < 2 => ((now - 600) / 120).clamp(0, 8),
+        Difficulty::Imago => ((now - 900) / 70).max(0),
     }
     .min(24);
     let threat = enemy_seen(w, colony).near_home;
@@ -620,7 +690,7 @@ pub fn decide(w: &World, colony: u8, d: Difficulty) -> Vec<Command> {
             if c.tier < 3 && !w.evolving(colony) {
                 let after = if c.tier == 1 { p.t2_after } else { p.t3_after };
                 let (cost, _) = evolve_cost(c.tier + 1);
-                if w.tick >= after {
+                if now >= after {
                     if afford(&stock, &cost) {
                         out.push(Command::Evolve);
                         spend(&mut stock, &cost);
@@ -801,7 +871,7 @@ pub fn decide(w: &World, colony: u8, d: Difficulty) -> Vec<Command> {
     // nothing to wait for: whatever army is left goes hunting.
     let nothing_to_lose = queens.is_empty() && hatcheries == 0;
     if army_pop >= attack_pop
-        || (w.tick > late.0 && army_pop >= (late.1 - (w.tick - late.0) / 300).max(6))
+        || (now > late.0 && army_pop >= (late.1 - (now - late.0) / 300).max(6))
         || (nothing_to_lose && army_pop > 0)
     {
         match attack_point(w, colony) {
@@ -835,7 +905,7 @@ pub fn decide(w: &World, colony: u8, d: Difficulty) -> Vec<Command> {
         })
         .unwrap_or(false);
     let rescout = d == Difficulty::Imago && scouted;
-    if p.nests > 0 && (!has_waypoint || rescout) && w.tick > 250 {
+    if p.nests > 0 && (!has_waypoint || rescout) && now > 250 {
         let target = w
             .map
             .chambers
@@ -900,7 +970,7 @@ fn try_new_nest(
         Difficulty::Imago => 1800 + have * 900,
         _ => 1600,
     };
-    if have >= p.nests || w.tick < nest_at || pending > 0 {
+    if have >= p.nests || tenths(w) < nest_at || pending > 0 {
         return false;
     }
     let Some((x, y)) = nest_spot(w, colony, home, d == Difficulty::Imago) else {

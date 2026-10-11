@@ -29,6 +29,19 @@ impl Bits {
             *w |= 1 << (i % 64);
         }
     }
+    /// Sets the first `n` cells (the whole map).
+    pub fn set_all(&mut self, n: usize) {
+        for (k, w) in self.words.iter_mut().enumerate() {
+            let lo = k * 64;
+            *w = if lo + 64 <= n {
+                u64::MAX
+            } else if lo < n {
+                (1u64 << (n - lo)) - 1
+            } else {
+                0
+            };
+        }
+    }
     pub fn clear_all(&mut self) {
         for w in self.words.iter_mut() {
             *w = 0;

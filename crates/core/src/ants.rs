@@ -7,8 +7,10 @@ use std::collections::BTreeMap;
 use crate::fixed::{heading16, isqrt, Pos, CELL};
 use crate::map::Ground;
 use crate::nav::{downhill, FieldKey, Mode, Terrain, NO_WALL, UNREACHED};
-use crate::rules::{damage_taken, Resource, Role, Species, StructureKind, SATURATION};
-use crate::world::{Ant, Effect, EffectKind, Id, Job, Target, World, INCOME_TICKS};
+use crate::rules::{damage_taken, ticks, Resource, Role, Species, StructureKind, SATURATION};
+use crate::world::{
+    drop_reach, pickup_reach, Ant, Effect, EffectKind, Id, Job, Target, World, INCOME_TICKS,
+};
 
 /// Spatial buckets rebuilt every tick: indices into `ants` and `structures`.
 #[derive(Default)]
@@ -101,6 +103,7 @@ impl World {
         }
         // Waypoint assignment: each species' ants split evenly, by id order.
         let mut ordinal: BTreeMap<(u8, usize), usize> = BTreeMap::new();
+        let scouts = self.pick_scouts();
 
         for i in 0..self.ants.len() {
             let mut a = self.ants[i];
@@ -111,6 +114,7 @@ impl World {
             match a.species.stats().role {
                 Role::Gatherer => self.gatherer(&mut a, &mut node_load, &mut res_load),
                 Role::Builder => self.builder(&mut a, &mut bp_load),
+                _ if scouts[a.colony as usize] == Some(a.id) => self.scout(&mut a),
                 _ => {
                     let k = (a.colony, a.species.index());
                     let n = ordinal.entry(k).or_insert(0);
@@ -428,8 +432,14 @@ impl World {
                 let Some((key, qpos, qr)) = self.queen_key(a) else {
                     return;
                 };
+                // The goal area lies inside the pickup reach, which
+                // placement keeps apart from every blueprint's site.
+                let key = FieldKey {
+                    r: qr / CELL,
+                    ..key
+                };
                 let step = self.follow(a, key);
-                if matches!(step, Step::Arrived) || a.pos.dist(qpos) <= qr + st.radius + CELL {
+                if matches!(step, Step::Arrived) || a.pos.dist(qpos) <= pickup_reach(qr) {
                     let mut room = st.carry;
                     let mut take = [0; 3];
                     for r in 0..3 {
@@ -446,13 +456,13 @@ impl World {
             }
             Job::Haul(b) => {
                 let si = self.structure_index(b).expect("checked");
-                let (x, y) = self.structures[si].pos.cell();
-                let r = self.structures[si].radius() / CELL + 1;
-                let near = self.structures[si].radius() + st.radius + CELL;
+                let (x, y, r) = self.structures[si].site_goal(a.pos);
                 let key = World::key_for(a, x, y, r);
                 let step = self.follow(a, key);
                 let si = self.structure_index(b).expect("checked");
-                if matches!(step, Step::Arrived) || a.pos.dist(self.structures[si].pos) <= near {
+                if matches!(step, Step::Arrived)
+                    || self.structures[si].site_dist(a.pos) <= drop_reach()
+                {
                     let s = &mut self.structures[si];
                     for r in 0..3 {
                         s.delivered[r] += a.inventory[r];
@@ -474,15 +484,13 @@ impl World {
                     a.job = Job::Fetch(b);
                     return;
                 }
-                let (x, y) = s.pos.cell();
-                let r = s.radius() / CELL + 1;
-                let near = s.radius() + st.radius + CELL;
+                let (x, y, r) = s.site_goal(a.pos);
                 let ready = s.fully_delivered();
                 let key = World::key_for(a, x, y, r);
                 let step = self.follow(a, key);
                 let si = self.structure_index(b).expect("checked");
-                let close =
-                    matches!(step, Step::Arrived) || a.pos.dist(self.structures[si].pos) <= near;
+                let close = matches!(step, Step::Arrived)
+                    || self.structures[si].site_dist(a.pos) <= drop_reach();
                 if close && ready {
                     let s = &mut self.structures[si];
                     s.work_done += st.build;
@@ -613,7 +621,7 @@ impl World {
                 _ => a.target = None,
             }
         }
-        if a.target.is_none() || (self.tick + a.id as i32) % 5 == 0 {
+        if a.target.is_none() || (self.tick + a.id as i32) % ticks(5) == 0 {
             if let Some(t) = self.find_target(a, aggro) {
                 // Keep digging unless an enemy shows up.
                 let digging = matches!(a.target, Some(Target::Dirt(..)));
@@ -684,6 +692,103 @@ impl World {
         }
     }
 
+    // ---- Auto-Scout ----
+
+    /// Keeps exactly one scout for every colony with Auto-Scout on: the
+    /// current one while it lives, else the best candidate (Fire Ant, then
+    /// Soldier Ant, then the fastest other combat ant; lowest id first).
+    fn pick_scouts(&mut self) -> Vec<Option<Id>> {
+        let mut out = vec![None; self.colonies.len()];
+        for (ci, slot) in out.iter_mut().enumerate() {
+            let c = &self.colonies[ci];
+            if !c.auto_scout || c.defeated {
+                continue;
+            }
+            let alive = |id: Id| {
+                self.ant(id)
+                    .is_some_and(|a| a.colony as usize == ci && a.health > 0 && !a.spent)
+            };
+            let cur = c.scout.filter(|&id| alive(id));
+            let pick = cur.or_else(|| {
+                self.ants
+                    .iter()
+                    .filter(|a| a.colony as usize == ci && a.species.is_combat() && a.health > 0)
+                    .min_by_key(|a| (scout_rank(a.species), a.id))
+                    .map(|a| a.id)
+            });
+            if pick != self.colonies[ci].scout {
+                self.colonies[ci].scout = pick;
+                self.colonies[ci].scout_goal = None;
+            }
+            *slot = pick;
+        }
+        out
+    }
+
+    /// The scout: ignores waypoints, Retreat and enemies, and visits the
+    /// chambers the team has not seen, nearest first, then sweeps the
+    /// chambers out of sight.
+    fn scout(&mut self, a: &mut Ant) {
+        a.target = None;
+        let ci = a.colony as usize;
+        let mode = if a.species.flies() {
+            Mode::Fly
+        } else {
+            // Walking fields go round dirt and enemy walls: a scout never
+            // stops to dig.
+            Mode::Walk
+        };
+        let goal = self.colonies[ci].scout_goal.filter(|&g| {
+            let ch = &self.map.chambers[g as usize];
+            !self.team_sees(a.colony, ch.cx, ch.cy)
+        });
+        let goal = match goal {
+            Some(g) => Some(g),
+            None => {
+                let last = self.colonies[ci].scout_goal;
+                let cands = crate::ai::scout_candidates(self, a.colony, a.pos, last);
+                let (cx, cy) = a.pos.cell();
+                let mut found = None;
+                for i in cands.into_iter().take(6) {
+                    let ch = &self.map.chambers[i];
+                    let key = FieldKey {
+                        colony: a.colony,
+                        mode,
+                        x: ch.cx,
+                        y: ch.cy,
+                        r: 2,
+                    };
+                    let t = Terrain {
+                        w: self.map.w,
+                        h: self.map.h,
+                        ground: &self.map.ground,
+                        wall: &self.wall,
+                    };
+                    if self.nav.field(&t, key).at(self.map.w, cx, cy) != UNREACHED {
+                        found = Some(i as u32);
+                        break;
+                    }
+                }
+                found
+            }
+        };
+        if goal != self.colonies[ci].scout_goal && goal.is_some() {
+            self.colonies[ci].scout_goal = goal;
+        }
+        let Some(g) = goal else {
+            return;
+        };
+        let ch = &self.map.chambers[g as usize];
+        let key = FieldKey {
+            colony: a.colony,
+            mode,
+            x: ch.cx,
+            y: ch.cy,
+            r: 2,
+        };
+        self.follow(a, key);
+    }
+
     fn nurse(&mut self, a: &mut Ant, st: &crate::rules::Stats) {
         let team = self.colonies[a.colony as usize].team;
         let mut best: Option<(i32, i64, usize)> = None;
@@ -725,7 +830,7 @@ impl World {
                         kind: EffectKind::Heal,
                         from: a.pos,
                         to: tp,
-                        until: self.tick + 3,
+                        until: self.tick + ticks(3),
                         colony: a.colony,
                     });
                 }
@@ -785,7 +890,7 @@ impl World {
             kind,
             from: a.pos,
             to: tp,
-            until: self.tick + if kind == EffectKind::Blast { 4 } else { 2 },
+            until: self.tick + ticks(if kind == EffectKind::Blast { 4 } else { 2 }),
             colony: a.colony,
         });
         if a.species == Species::Exploding {
@@ -952,5 +1057,15 @@ impl World {
         for c in queens_lost {
             self.announce("notice.queen_lost", Some(c), None);
         }
+    }
+}
+
+/// Auto-Scout's preference: the fast, cheap Fire Ant, then the Soldier Ant,
+/// then any other combat ant, fastest first.
+fn scout_rank(s: Species) -> (u8, i32) {
+    match s {
+        Species::Fire => (0, 0),
+        Species::Soldier => (1, 0),
+        _ => (2, -s.stats().speed),
     }
 }

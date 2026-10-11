@@ -62,11 +62,12 @@ pub enum GameSpeed {
 }
 
 impl GameSpeed {
+    /// The simulation runs at 20 ticks per second at Normal.
     pub fn ms_per_tick(self) -> i64 {
         match self {
-            GameSpeed::Slow => 140,
-            GameSpeed::Normal => 100,
-            GameSpeed::Fast => 70,
+            GameSpeed::Slow => 70,
+            GameSpeed::Normal => 50,
+            GameSpeed::Fast => 35,
         }
     }
 }

@@ -8,13 +8,14 @@
 use serde::{Deserialize, Serialize};
 
 use crate::dice::{fnv, fnv_i64, Rng, FNV_START};
-use crate::fixed::{cos64, sin64, Pos, CELL, TRIG_ONE};
+use crate::fixed::{cos64, isqrt, sin64, Pos, CELL, TRIG_ONE};
 use crate::fog::{Bits, Rays};
 use crate::map::{self, Ground, Map, DIRT_HEALTH};
 use crate::nav::{Nav, NO_WALL};
 use crate::rules::{
     affordable, evolve_cost, times_affordable, Cost, Ranks, Resource, Species, StructureKind,
-    Upgrade, POP_CAP, TICKS_PER_SECOND, WALL_MAX_CELLS, WAYPOINTS_PER_SPECIES,
+    Upgrade, POP_CAP, SANDBOX_STOCK, TICKS_PER_SECOND, WALL_MAX_CELLS, WALL_SECTION_CELLS,
+    WAYPOINTS_PER_SPECIES,
 };
 use crate::settings::{Difficulty, MatchSettings, SeatKind};
 
@@ -229,6 +230,75 @@ impl Structure {
     pub fn fully_delivered(&self) -> bool {
         (0..3).all(|i| self.delivered[i] >= self.cost[i])
     }
+
+    /// Distance from `p` to the edge of the footprint; for a wall line, to
+    /// the edge of its nearest cell (a line is never measured from its
+    /// middle).
+    pub fn site_dist(&self, p: Pos) -> i32 {
+        if self.kind == StructureKind::Wall && !self.cells.is_empty() {
+            self.cells
+                .iter()
+                .map(|&(x, y)| p.dist(Pos::of_cell(x, y)))
+                .min()
+                .unwrap_or(0)
+                - CELL / 2
+        } else {
+            p.dist(self.pos) - self.radius()
+        }
+    }
+
+    /// Where a Carpenter Ant coming from `from` walks to: a goal cell and
+    /// a goal radius whose every cell lies within `drop_reach` of the
+    /// footprint, so arriving always means being at the site.
+    pub fn site_goal(&self, from: Pos) -> (i32, i32, i32) {
+        if self.kind == StructureKind::Wall && !self.cells.is_empty() {
+            let (x, y) = self
+                .cells
+                .iter()
+                .copied()
+                .min_by_key(|&(x, y)| (Pos::of_cell(x, y).dist2(from), x, y))
+                .unwrap_or(self.pos.cell());
+            let r = (0..8)
+                .rev()
+                .find(|&r| goal_reach(r) <= CELL / 2 + drop_reach())
+                .unwrap_or(0);
+            (x, y, r)
+        } else {
+            let (x, y) = self.pos.cell();
+            let r = (0..8)
+                .rev()
+                .find(|&r| goal_reach(r) <= self.radius() + drop_reach())
+                .unwrap_or(0);
+            (x, y, r)
+        }
+    }
+}
+
+/// How far from a field's goal cell centre an ant can stand once the field
+/// says it has arrived: goal cells lie within sqrt(r² + r) cells (see
+/// `nav`), and an ant is anywhere inside its own cell.
+pub fn goal_reach(r: i32) -> i32 {
+    isqrt(((r * r + r) as i64 * (CELL as i64).pow(2)) as u64) as i32 + 3 * CELL / 4
+}
+
+/// A Carpenter Ant takes Leaves from a queen within this distance of the
+/// queen's centre.
+pub fn pickup_reach(queen_radius: i32) -> i32 {
+    queen_radius + Species::Carpenter.stats().radius + CELL
+}
+
+/// A Carpenter Ant hands Leaves in, and builds, within this distance of a
+/// blueprint's footprint.
+pub fn drop_reach() -> i32 {
+    Species::Carpenter.stats().radius + CELL / 2
+}
+
+/// The least distance from a queen's centre to a blueprint site whose
+/// delivery reach is `site_reach` (from the site's centre): the two reaches
+/// never overlap and at least half a cell of walking lies between them, so
+/// Leaves are always carried (TRIAGE row 12).
+pub fn queen_clearance(queen_radius: i32, site_reach: i32) -> i32 {
+    pickup_reach(queen_radius) + site_reach + CELL / 2
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -270,6 +340,12 @@ pub struct Colony {
     /// Auto-Scout is on. The simulation picks the scout itself.
     #[serde(default)]
     pub auto_scout: bool,
+    /// The ant scouting for Auto-Scout, while it is on.
+    #[serde(default)]
+    pub scout: Option<Id>,
+    /// The chamber (index into `map.chambers`) the scout is heading for.
+    #[serde(default)]
+    pub scout_goal: Option<u32>,
     pub waypoints: Vec<Vec<Pos>>,
     /// Deliveries per tick for the last 10 seconds, for Income.
     pub income_ring: Vec<Cost>,
@@ -322,7 +398,7 @@ pub enum EffectKind {
 pub const HILL_TICKS: i32 = 45 * TICKS_PER_SECOND;
 pub const HILL_REWARD: Cost = [300, 150, 150];
 pub const WINDFALL_AMOUNT: i32 = 400;
-pub const INCOME_TICKS: usize = 100;
+pub const INCOME_TICKS: usize = 10 * TICKS_PER_SECOND as usize;
 
 #[derive(Serialize, Deserialize)]
 pub struct World {
@@ -341,6 +417,11 @@ pub struct World {
     pub events: Events,
     pub visible: Vec<Bits>,
     pub explored: Vec<Bits>,
+    /// With Map Revealed, the cells each colony has really had in sight
+    /// (Explored starts full, so the AI cannot use it to know where enemy
+    /// structures are). Empty otherwise.
+    #[serde(default)]
+    pub sighted: Vec<Bits>,
     pub announcements: Vec<Announcement>,
     pub effects: Vec<Effect>,
     pub winner: Option<u8>,
@@ -423,6 +504,7 @@ impl World {
             },
             visible: Vec::new(),
             explored: Vec::new(),
+            sighted: Vec::new(),
             announcements: Vec::new(),
             effects: Vec::new(),
             winner: None,
@@ -457,11 +539,17 @@ impl World {
                 },
                 defeated: false,
                 stock: starting_stock(settings.starting_resources),
-                tier: 1,
+                tier: if settings.sandbox && kind == SeatKind::Human {
+                    3
+                } else {
+                    1
+                },
                 ranks: Ranks::default(),
                 focus: Focus::Balanced,
                 retreat: false,
                 auto_scout: false,
+                scout: None,
+                scout_goal: None,
                 waypoints: vec![Vec::new(); Species::ALL.len()],
                 income_ring: vec![[0; 3]; INCOME_TICKS],
                 tally: Tally::default(),
@@ -469,6 +557,9 @@ impl World {
             });
             w.visible.push(Bits::new(n));
             w.explored.push(Bits::new(n));
+            if settings.map_revealed {
+                w.sighted.push(Bits::new(n));
+            }
             let home = w.map.home(seat).clone();
             let qpos = Pos::of_cell(home.cx, home.cy);
             let q = w.add_structure(seat as u8, StructureKind::Queen, qpos, Vec::new(), true);
@@ -495,9 +586,26 @@ impl World {
                     w.explored[seat].set(i);
                 }
             }
+            if w.settings.map_revealed {
+                // Map Revealed: the whole map is Explored, not Visible.
+                w.explored[seat].set_all(n);
+            }
         }
+        w.sandbox_refill();
         w.update_fog();
         w
+    }
+
+    /// Sandbox: Human colonies have unlimited resources.
+    fn sandbox_refill(&mut self) {
+        if !self.settings.sandbox {
+            return;
+        }
+        for c in self.colonies.iter_mut() {
+            if c.controller == Controller::Human && !c.defeated {
+                c.stock = [SANDBOX_STOCK; 3];
+            }
+        }
     }
 
     pub fn new_id(&mut self) -> Id {
@@ -664,7 +772,14 @@ impl World {
             max_health: st.health,
             complete,
             cost,
-            delivered: if complete { cost } else { [0; 3] },
+            // Only Leaves, the building resource, are carried to a
+            // blueprint; Food and Nectar left the stockpile at placement
+            // and count as delivered at once (TRIAGE row 26).
+            delivered: if complete {
+                cost
+            } else {
+                [cost[0], cost[1], 0]
+            },
             promised: [0; 3],
             work: st.work * n,
             work_done: if complete { st.work * n } else { 0 },
@@ -699,6 +814,7 @@ impl World {
     /// `dropped` lists seats whose player left, now handed to the AI.
     pub fn step(&mut self, commands: &[(u8, Command)], dropped: &[u8]) {
         self.tick += 1;
+        self.sandbox_refill();
         for &seat in dropped {
             if let Some(c) = self.colonies.get_mut(seat as usize) {
                 if c.controller == Controller::Human {
@@ -727,11 +843,13 @@ impl World {
         self.run_lanes();
         self.run_events();
         self.run_ants();
-        if self.tick % 2 == 0 {
+        // Fog five times a second.
+        if self.tick % (TICKS_PER_SECOND / 5) == 0 {
             self.update_fog();
         }
         self.effects.retain(|e| e.until > self.tick);
         self.check_victory();
+        self.sandbox_refill();
     }
 
     /// Applies one command for a colony; refusals become notices.
@@ -840,7 +958,12 @@ impl World {
                 Ok(())
             }
             Command::AutoScout { on } => {
-                self.colonies[ci].auto_scout = *on;
+                let c = &mut self.colonies[ci];
+                c.auto_scout = *on;
+                if !*on {
+                    c.scout = None;
+                    c.scout_goal = None;
+                }
                 Ok(())
             }
             Command::Focus { focus } => {
@@ -1065,12 +1188,87 @@ impl World {
 
     // ---- placement ----
 
-    /// The cells a wall from (x, y) to (x2, y2) covers, at most
-    /// `WALL_MAX_CELLS` long.
+    /// The cells of a wall line from (x, y) to (x2, y2), at most
+    /// `WALL_MAX_CELLS` long. Some may be skipped when placed: see
+    /// `wall_plan`.
     pub fn wall_cells(x: i32, y: i32, x2: i32, y2: i32) -> Vec<(i32, i32)> {
         let mut cells = crate::fog::line(x, y, x2, y2);
         cells.truncate(WALL_MAX_CELLS as usize);
         cells
+    }
+
+    /// Whether one cell of a wall line can hold a wall: open, explored
+    /// floor, clear of structures, nodes and a queen's pickup reach.
+    fn wall_cell_ok(&self, colony: u8, (cx, cy): (i32, i32)) -> bool {
+        if !self.map.is_floor(cx, cy) {
+            return false;
+        }
+        let i = self.map.idx(cx, cy);
+        if self.wall[i] != NO_WALL || !self.explored[colony as usize].get(i) {
+            return false;
+        }
+        let at = Pos::of_cell(cx, cy);
+        for s in &self.structures {
+            if s.kind == StructureKind::Wall {
+                if s.cells.contains(&(cx, cy)) {
+                    return false;
+                }
+                continue;
+            }
+            let (sx, sy) = s.pos.cell();
+            let reach = s.radius() / CELL + 1;
+            if (cx - sx).abs() <= reach && (cy - sy).abs() <= reach {
+                return false;
+            }
+            if s.kind == StructureKind::Queen
+                && s.pos.dist(at) < queen_clearance(s.radius(), CELL / 2 + drop_reach())
+            {
+                return false;
+            }
+        }
+        !self
+            .nodes
+            .iter()
+            .any(|n| n.amount > 0 && n.pos.dist(at) < CELL * 2)
+    }
+
+    /// The cells a wall line would really get: the line, skipping every
+    /// cell that cannot hold a wall (rock, dirt, other structures). Used
+    /// for the placement ghost and the cost too.
+    pub fn wall_plan(&self, colony: u8, x: i32, y: i32, x2: i32, y2: i32) -> Vec<(i32, i32)> {
+        World::wall_cells(x, y, x2, y2)
+            .into_iter()
+            .filter(|c| self.wall_cell_ok(colony, *c))
+            .collect()
+    }
+
+    /// The wall line split into blueprints: runs of buildable cells, each
+    /// at most `WALL_SECTION_CELLS` long, so a long wall rises section by
+    /// section instead of waiting for its whole cost.
+    pub fn wall_sections(
+        &self,
+        colony: u8,
+        x: i32,
+        y: i32,
+        x2: i32,
+        y2: i32,
+    ) -> Vec<Vec<(i32, i32)>> {
+        let mut out: Vec<Vec<(i32, i32)>> = Vec::new();
+        let mut cur: Vec<(i32, i32)> = Vec::new();
+        for c in World::wall_cells(x, y, x2, y2) {
+            if self.wall_cell_ok(colony, c) {
+                cur.push(c);
+                if cur.len() >= WALL_SECTION_CELLS {
+                    out.push(std::mem::take(&mut cur));
+                }
+            } else if !cur.is_empty() {
+                out.push(std::mem::take(&mut cur));
+            }
+        }
+        if !cur.is_empty() {
+            out.push(cur);
+        }
+        out
     }
 
     /// Whether a structure may be placed; used for the placement ghost too.
@@ -1093,16 +1291,16 @@ impl World {
                 return Err(Refusal::Disabled);
             }
         }
-        let cells: Vec<(i32, i32)> = if kind == StructureKind::Wall {
-            World::wall_cells(x, y, x2, y2)
-        } else {
-            let r = kind.stats().radius / CELL;
-            map::disk_offsets(r)
-                .into_iter()
-                .map(|(dx, dy)| (x + dx, y + dy))
-                .collect()
-        };
-        for &(cx, cy) in &cells {
+        if kind == StructureKind::Wall {
+            return if self.wall_plan(colony, x, y, x2, y2).is_empty() {
+                Err(Refusal::BadPlace)
+            } else {
+                Ok(())
+            };
+        }
+        let r = kind.stats().radius / CELL;
+        for (dx, dy) in map::disk_offsets(r) {
+            let (cx, cy) = (x + dx, y + dy);
             if !self.map.is_floor(cx, cy)
                 || self.wall[self.map.idx(cx, cy)] != NO_WALL
                 || !self.explored[ci].get(self.map.idx(cx, cy))
@@ -1110,46 +1308,23 @@ impl World {
                 return Err(Refusal::BadPlace);
             }
         }
-        let centre = if kind == StructureKind::Wall {
-            Pos::of_cell((x + x2) / 2, (y + y2) / 2)
-        } else {
-            Pos::of_cell(x, y)
-        };
-        let my_r = if kind == StructureKind::Wall {
-            CELL / 2
-        } else {
-            kind.stats().radius
-        };
+        let centre = Pos::of_cell(x, y);
+        let my_r = kind.stats().radius;
         // Clear of other structures and of nodes.
         for s in &self.structures {
-            let blocks = if s.kind == StructureKind::Wall || kind == StructureKind::Wall {
-                let mine: Vec<(i32, i32)> = if kind == StructureKind::Wall {
-                    cells.clone()
-                } else {
-                    vec![(x, y)]
-                };
-                let theirs: Vec<(i32, i32)> = if s.kind == StructureKind::Wall {
-                    s.cells.clone()
-                } else {
-                    vec![s.pos.cell()]
-                };
-                let reach = if kind == StructureKind::Wall && s.kind == StructureKind::Wall {
-                    0
-                } else {
-                    let other = if s.kind == StructureKind::Wall {
-                        my_r
-                    } else {
-                        s.radius()
-                    };
-                    other / CELL + 1
-                };
-                mine.iter().any(|a| {
-                    theirs
-                        .iter()
-                        .any(|b| (a.0 - b.0).abs() <= reach && (a.1 - b.1).abs() <= reach)
-                })
+            let blocks = if s.kind == StructureKind::Wall {
+                let reach = my_r / CELL + 1;
+                s.cells
+                    .iter()
+                    .any(|b| (x - b.0).abs() <= reach && (y - b.1).abs() <= reach)
             } else {
                 s.pos.dist(centre) < s.radius() + my_r + CELL / 2
+                    // A queen's pickup reach and a blueprint's delivery
+                    // reach never meet.
+                    || (s.kind == StructureKind::Queen
+                        && s.pos.dist(centre) < queen_clearance(s.radius(), my_r + drop_reach()))
+                    || (kind == StructureKind::Queen
+                        && s.pos.dist(centre) < queen_clearance(my_r, s.radius() + drop_reach()))
             };
             if blocks {
                 return Err(Refusal::BadPlace);
@@ -1157,9 +1332,9 @@ impl World {
         }
         for n in &self.nodes {
             if n.amount > 0
-                && cells
-                    .iter()
-                    .any(|&(cx, cy)| n.pos.dist(Pos::of_cell(cx, cy)) < CELL * 2)
+                && map::disk_offsets(r)
+                    .into_iter()
+                    .any(|(dx, dy)| n.pos.dist(Pos::of_cell(x + dx, y + dy)) < CELL * 2)
             {
                 return Err(Refusal::BadPlace);
             }
@@ -1177,7 +1352,6 @@ impl World {
                     return Err(Refusal::BadPlace);
                 }
             }
-            StructureKind::Wall => {}
             _ => {
                 let near = self.structures.iter().any(|s| {
                     s.colony == colony
@@ -1202,24 +1376,23 @@ impl World {
         y2: i32,
     ) -> Result<Id, Refusal> {
         self.check_place(colony, kind, x, y, x2, y2)?;
-        let (cells, pos) = if kind == StructureKind::Wall {
-            let cells = World::wall_cells(x, y, x2, y2);
-            let (sx, sy) = cells.iter().fold((0, 0), |a, c| (a.0 + c.0, a.1 + c.1));
-            let n = cells.len() as i32;
-            let pos = Pos::new(sx * CELL / n + CELL / 2, sy * CELL / n + CELL / 2);
-            (cells, pos)
-        } else {
-            (Vec::new(), Pos::of_cell(x, y))
-        };
-        let n = cells.len().max(1) as i32;
+        if kind != StructureKind::Wall {
+            self.pay(colony, &kind.stats().cost)?;
+            return Ok(self.add_structure(colony, kind, Pos::of_cell(x, y), Vec::new(), false));
+        }
+        let sections = self.wall_sections(colony, x, y, x2, y2);
+        let n: i32 = sections.iter().map(|s| s.len() as i32).sum();
         let base = kind.stats().cost;
-        let cost = if kind == StructureKind::Wall {
-            [base[0] * n, base[1] * n, base[2] * n]
-        } else {
-            base
-        };
-        self.pay(colony, &cost)?;
-        Ok(self.add_structure(colony, kind, pos, cells, false))
+        self.pay(colony, &[base[0] * n, base[1] * n, base[2] * n])?;
+        let mut first = None;
+        for cells in sections {
+            let (sx, sy) = cells.iter().fold((0, 0), |a, c| (a.0 + c.0, a.1 + c.1));
+            let k = cells.len() as i32;
+            let pos = Pos::new(sx * CELL / k + CELL / 2, sy * CELL / k + CELL / 2);
+            let id = self.add_structure(colony, kind, pos, cells, false);
+            first.get_or_insert(id);
+        }
+        first.ok_or(Refusal::BadPlace)
     }
 
     /// Turns a finished blueprint into its structure.
@@ -1427,7 +1600,39 @@ impl World {
                 self.rays.cast(w, h, x, y, r, &opaque, vis);
             }
             self.explored[c].union_with(&self.visible[c]);
+            if let Some(s) = self.sighted.get_mut(c) {
+                s.union_with(&self.visible[c]);
+            }
         }
+    }
+
+    /// Whether a colony or an ally sees a cell right now.
+    pub fn team_sees(&self, colony: u8, x: i32, y: i32) -> bool {
+        if !self.map.inside(x, y) {
+            return false;
+        }
+        let i = self.map.idx(x, y);
+        let team = self.colonies[colony as usize].team;
+        self.colonies
+            .iter()
+            .enumerate()
+            .any(|(k, c)| c.team == team && self.visible[k].get(i))
+    }
+
+    /// The cells a colony and its allies have really had in sight. The same
+    /// as `team_explored`, except with Map Revealed, where Explored starts
+    /// full.
+    pub fn team_sighted(&self, colony: u8) -> Bits {
+        if self.sighted.len() != self.colonies.len() {
+            return self.team_explored(colony);
+        }
+        let mut v = self.sighted[colony as usize].clone();
+        for (i, c) in self.colonies.iter().enumerate() {
+            if i != colony as usize && c.team == self.colonies[colony as usize].team {
+                v.union_with(&self.sighted[i]);
+            }
+        }
+        v
     }
 
     /// What a colony and its allies see right now.
