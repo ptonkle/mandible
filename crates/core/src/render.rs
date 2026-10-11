@@ -53,6 +53,8 @@ pub const ZOOMS: [i32; 15] = [
 const DETAIL_ZOOM: i32 = 96;
 /// From this zoom ants get a dark outline.
 const OUTLINE_ZOOM: i32 = 64;
+/// From this zoom ants carry their dark role mark.
+const MARK_ZOOM: i32 = 96;
 
 /// Op codes of the draw list and their argument layouts. Coordinates and
 /// widths are draw-list units; colours are palette indices.
@@ -110,7 +112,7 @@ pub const IMAGE_MINIMAP: i32 = 2;
 /// Every colour the page uses. Player colours come first, by seat: red, blue,
 /// yellow and white, chosen to be as far apart as possible and to stand out
 /// against both biomes' ground, always with a dark outline.
-pub const PALETTE: [&str; 27] = [
+pub const PALETTE: [&str; 29] = [
     "#f0302a",
     "#2f7cff",
     "#ffd400",
@@ -138,6 +140,8 @@ pub const PALETTE: [&str; 27] = [
     "rgba(255,207,63,0.13)",
     "#ffffff",
     "#2a1d12",
+    "#7a5c3e",
+    "#ffb347",
 ];
 const C_PLAYER: i32 = 0;
 const C_SOFT: i32 = 4;
@@ -160,6 +164,8 @@ const C_HILL: i32 = 23;
 const C_HILL_FILL: i32 = 24;
 const C_HOVER: i32 = 25;
 const C_POLE: i32 = 26;
+const C_FLOOR: i32 = 27;
+const C_BLAST_RING: i32 = 28;
 
 /// Player colours as RGB, for the minimap.
 pub const PLAYER_RGB: [[u8; 3]; 4] = [
@@ -363,28 +369,293 @@ fn same_winding(shape: &mut Shape) {
     }
 }
 
-/// The parts of a species' body in template units (body radius 100, facing
-/// east). `detailed` adds legs and antennae. Every species has its own
-/// silhouette.
-fn ant_template(s: Species, detailed: bool) -> Shape {
-    // (centre x, radius x, radius y) of abdomen, thorax and head.
-    let (abd, tho, head) = match s {
-        Species::Harvester => ((-78, 55, 42), (2, 26, 16), (46, 24, 22)),
-        Species::Soldier => ((-72, 46, 34), (2, 26, 17), (52, 32, 30)),
-        Species::Carpenter => ((-82, 58, 30), (2, 26, 16), (50, 24, 24)),
-        Species::Leafcutter => ((-66, 40, 30), (0, 22, 14), (36, 20, 18)),
-        Species::Fire => ((-62, 42, 22), (0, 22, 11), (38, 18, 16)),
-        Species::Turtle => ((-62, 48, 52), (0, 24, 24), (46, 22, 40)),
-        Species::Acid => ((-70, 50, 40), (2, 24, 15), (44, 22, 20)),
-        Species::Nurse => ((-66, 44, 44), (2, 24, 15), (44, 22, 20)),
-        Species::Flying => ((-74, 48, 30), (2, 28, 18), (46, 22, 20)),
-        Species::Exploding => ((-62, 58, 58), (6, 22, 14), (44, 20, 18)),
-        Species::TrapJaw => ((-70, 44, 32), (0, 26, 16), (46, 26, 22)),
-        Species::Dinosaur => ((-90, 60, 38), (0, 36, 20), (62, 30, 26)),
+/// A closed outline from its upper half (y ≤ 0, nose to tail or tail to
+/// nose): the lower half is the mirror image.
+fn mirrored(half: &[Pt]) -> Vec<Pt> {
+    let mut v: Vec<Pt> = half.to_vec();
+    v.extend(half.iter().rev().map(|&(x, y)| (x, -y)));
+    v
+}
+
+/// A thick open polyline as one bar per segment.
+fn bars(parts: &mut Shape, pts: &[Pt], t: i32) {
+    for w in pts.windows(2) {
+        parts.push(bar(w[0], w[1], t));
+    }
+}
+
+/// A star with `n` points around (cx, cy), radii `outer` and `inner`.
+fn star(cx: i32, cy: i32, outer: i32, inner: i32, n: usize) -> Vec<Pt> {
+    (0..2 * n)
+        .map(|k| {
+            let r = if k % 2 == 0 { outer } else { inner };
+            let st = k * STEPS / (2 * n);
+            (cx + r * cos64(st) / TRIG_ONE, cy + r * sin64(st) / TRIG_ONE)
+        })
+        .collect()
+}
+
+/// A chevron pointing forward (east) with its tip at x.
+fn chevron(x: i32, reach: i32, wide: i32, t: i32) -> Vec<Pt> {
+    mirrored(&[
+        (x, 0),
+        (x - reach, -wide),
+        (x - reach - t, -wide),
+        (x - t, 0),
+    ])
+}
+
+/// One species, in template units (body radius 100, facing east): the body
+/// in the player colour, the dark role mark drawn on it, where the head is
+/// (centre x, radius) for the antennae, and how far the legs spread
+/// (percent).
+struct Parts {
+    body: Shape,
+    mark: Shape,
+    head: (i32, i32),
+    legs: i32,
+}
+
+/// Small pincers in front of a head whose front is at x.
+fn small_jaws(body: &mut Shape, front: i32) {
+    for side in [1, -1] {
+        body.push(bar((front - 4, 8 * side), (front + 14, 4 * side), 8));
+    }
+}
+
+/// Every species has a silhouette of its own, readable at 8 pixels per cell:
+/// workers are small and plain, fighters bigger and armed, and each role
+/// carries a dark mark (a crumb for Gatherers, a beam for Builders, a
+/// chevron for Melee, a droplet for Ranged, a cross for Support, shell
+/// plates for the Tank, wing veins for the Flyer, a burst for the Bomber
+/// and a spine for the Brute).
+fn species_parts(s: Species) -> Parts {
+    let mut body: Shape = Vec::new();
+    let mut mark: Shape = Vec::new();
+    let waist = |body: &mut Shape, x: i32| body.push(ellipse(x, 0, 10, 8, 0, 8));
+    let (head, legs) = match s {
+        Species::Harvester => {
+            body.push(ellipse(-70, 0, 46, 34, 0, 16));
+            waist(&mut body, -20);
+            body.push(ellipse(2, 0, 22, 13, 0, 12));
+            body.push(ellipse(38, 0, 18, 17, 0, 14));
+            small_jaws(&mut body, 56);
+            // A crumb.
+            mark.push(ellipse(-72, -3, 19, 15, 6, 10));
+            mark.push(ellipse(-56, 9, 9, 8, 0, 8));
+            ((38, 18), 100)
+        }
+        Species::Carpenter => {
+            // A long box of an abdomen and a square head as wide as it.
+            body.push(mirrored(&[
+                (-30, 0),
+                (-30, -26),
+                (-40, -36),
+                (-118, -36),
+                (-128, -26),
+                (-128, 0),
+            ]));
+            waist(&mut body, -22);
+            body.push(ellipse(0, 0, 22, 16, 0, 12));
+            body.push(mirrored(&[
+                (72, 0),
+                (72, -28),
+                (64, -36),
+                (26, -36),
+                (18, -28),
+                (18, 0),
+            ]));
+            for side in [1, -1] {
+                bars(
+                    &mut body,
+                    &[(64, 26 * side), (90, 24 * side), (100, 8 * side)],
+                    13,
+                );
+            }
+            // A beam carried across the back.
+            mark.push(bar((-2, -62), (-2, 62), 22));
+            mark.push(bar((-80, -24), (-80, 24), 12));
+            ((46, 26), 100)
+        }
+        Species::Soldier => {
+            body.push(ellipse(-74, 0, 44, 32, 0, 16));
+            waist(&mut body, -24);
+            body.push(ellipse(0, 0, 24, 15, 0, 12));
+            body.push(ellipse(50, 0, 30, 30, 0, 14));
+            for side in [1, -1] {
+                body.push(vec![
+                    (70, 20 * side),
+                    (98, 26 * side),
+                    (120, 4 * side),
+                    (100, 12 * side),
+                    (74, 8 * side),
+                ]);
+            }
+            mark.push(chevron(-50, 30, 24, 14));
+            ((50, 30), 105)
+        }
+        Species::Leafcutter => {
+            body.push(ellipse(-66, 0, 40, 30, 0, 16));
+            waist(&mut body, -18);
+            body.push(ellipse(0, 0, 22, 14, 0, 12));
+            body.push(ellipse(36, 0, 20, 18, 0, 14));
+            // The leaf it carries, held up over its head, with its veins.
+            body.push(lens((24, 0), 130, 84, 0));
+            bars(&mut mark, &[(36, 0), (146, 0)], 9);
+            for (x, l) in [(62, 26), (96, 22)] {
+                for side in [1, -1] {
+                    mark.push(bar((x, 0), (x + 20, l * side), 7));
+                }
+            }
+            ((36, 20), 95)
+        }
+        Species::Fire => {
+            // Slim and wasp-waisted, with a sting.
+            body.push(ellipse(-62, 0, 44, 20, 0, 16));
+            body.push(vec![(-100, -8), (-140, 0), (-100, 8)]);
+            waist(&mut body, -14);
+            body.push(ellipse(2, 0, 22, 11, 0, 12));
+            body.push(ellipse(36, 0, 17, 15, 0, 14));
+            small_jaws(&mut body, 53);
+            mark.push(bar((-50, -22), (-50, 22), 12));
+            mark.push(bar((-78, -20), (-78, 20), 12));
+            ((36, 17), 90)
+        }
+        Species::Turtle => {
+            // A round shell over thorax and abdomen, and a flat shield head.
+            body.push(ellipse(-34, 0, 74, 62, 0, 20));
+            body.push(ellipse(46, 0, 18, 36, 0, 14));
+            body.push(ellipse(22, 0, 18, 18, 0, 10));
+            let hex: Vec<Pt> = (0..7)
+                .map(|k| {
+                    let p = rotate((34, 0), k * STEPS / 6);
+                    (p.0 - 34, p.1)
+                })
+                .collect();
+            bars(&mut mark, &hex, 11);
+            for k in 0..6 {
+                let a = rotate((34, 0), k * STEPS / 6);
+                let b = rotate((62, 0), k * STEPS / 6);
+                mark.push(bar((a.0 - 34, a.1), (b.0 * 9 / 10 - 34, b.1 * 4 / 5), 9));
+            }
+            ((46, 18), 125)
+        }
+        Species::Acid => {
+            // A swollen abdomen drawn out to a long spraying tip.
+            body.push(ellipse(-62, 0, 46, 38, 0, 16));
+            body.push(vec![(-92, -24), (-162, 0), (-92, 24)]);
+            waist(&mut body, -16);
+            body.push(ellipse(2, 0, 22, 14, 0, 12));
+            body.push(ellipse(40, 0, 20, 19, 0, 14));
+            small_jaws(&mut body, 60);
+            mark.push(ellipse(-54, 0, 17, 17, 0, 12));
+            mark.push(vec![(-56, -16), (-104, 0), (-56, 16)]);
+            ((40, 20), 100)
+        }
+        Species::Nurse => {
+            body.push(ellipse(-66, 0, 48, 48, 0, 18));
+            waist(&mut body, -14);
+            body.push(ellipse(4, 0, 22, 15, 0, 12));
+            body.push(ellipse(40, 0, 19, 18, 0, 14));
+            small_jaws(&mut body, 59);
+            mark.push(bar((-66, -34), (-66, 34), 20));
+            mark.push(bar((-100, 0), (-32, 0), 20));
+            ((40, 19), 100)
+        }
+        Species::Flying => {
+            body.push(ellipse(-74, 0, 46, 26, 0, 16));
+            waist(&mut body, -24);
+            body.push(ellipse(2, 0, 28, 18, 0, 12));
+            body.push(ellipse(46, 0, 20, 19, 0, 14));
+            small_jaws(&mut body, 66);
+            for (side, rot) in [(1, STEPS - 5), (-1, 5)] {
+                body.push(ellipse(-48, 46 * side, 84, 26, rot, 16));
+                let a = rotate((64, 0), rot);
+                let b = rotate((-70, 0), rot);
+                mark.push(bar(
+                    (a.0 - 48, a.1 + 46 * side),
+                    (b.0 - 48, b.1 + 46 * side),
+                    8,
+                ));
+            }
+            ((46, 20), 95)
+        }
+        Species::Exploding => {
+            body.push(ellipse(-62, 0, 58, 58, 0, 18));
+            for k in 0..6 {
+                let st = k * STEPS / 6 + 5;
+                let a = rotate((52, -14), st);
+                let b = rotate((90, 0), st);
+                let c = rotate((52, 14), st);
+                body.push(vec![(a.0 - 62, a.1), (b.0 - 62, b.1), (c.0 - 62, c.1)]);
+            }
+            waist(&mut body, -4);
+            body.push(ellipse(10, 0, 20, 14, 0, 12));
+            body.push(ellipse(44, 0, 18, 17, 0, 14));
+            small_jaws(&mut body, 62);
+            mark.push(star(-62, 0, 36, 14, 8));
+            ((44, 18), 100)
+        }
+        Species::TrapJaw => {
+            body.push(ellipse(-70, 0, 44, 32, 0, 16));
+            waist(&mut body, -20);
+            body.push(ellipse(2, 0, 26, 16, 0, 12));
+            body.push(ellipse(48, 0, 26, 22, 0, 14));
+            for side in [1, -1] {
+                body.push(bar((66, 10 * side), (136, 16 * side), 10));
+                body.push(bar((130, 16 * side), (138, 2 * side), 9));
+            }
+            mark.push(chevron(-44, 26, 22, 12));
+            mark.push(chevron(-70, 26, 22, 12));
+            ((48, 26), 105)
+        }
+        Species::Dinosaur => {
+            // A huge armoured brute with spikes down both flanks and tusks.
+            body.push(ellipse(-88, 0, 60, 40, 0, 18));
+            for x in [-122, -90, -58] {
+                let w = if x == -90 { 36 } else { 30 };
+                for side in [1, -1] {
+                    body.push(vec![
+                        (x - 14, w * side),
+                        (x + 4, (w + 30) * side),
+                        (x + 12, w * side),
+                    ]);
+                }
+            }
+            waist(&mut body, -24);
+            body.push(ellipse(0, 0, 34, 22, 0, 12));
+            for side in [1, -1] {
+                body.push(vec![(-12, 18 * side), (4, 46 * side), (14, 18 * side)]);
+            }
+            body.push(ellipse(60, 0, 30, 28, 0, 14));
+            for side in [1, -1] {
+                bars(
+                    &mut body,
+                    &[(78, 14 * side), (104, 24 * side), (122, 10 * side)],
+                    13,
+                );
+            }
+            for x in [-124, -92, -60, -4] {
+                mark.push(mirrored(&[(x + 15, 0), (x, -10), (x - 15, 0)]));
+            }
+            ((60, 30), 112)
+        }
     };
-    let mut parts: Shape = Vec::new();
-    let (hx, hr) = (head.0, head.1);
+    Parts {
+        body,
+        mark,
+        head,
+        legs,
+    }
+}
+
+/// The parts of a species' body in template units (body radius 100, facing
+/// east); the abdomen is the first part. `detailed` adds legs and antennae.
+fn ant_template(s: Species, detailed: bool) -> Shape {
+    let p = species_parts(s);
+    let mut parts = p.body;
     if detailed {
+        let (hx, hr) = p.head;
         for side in [1, -1] {
             let legs = [
                 [(10, 6), (32, 40), (58, 58)],
@@ -392,106 +663,18 @@ fn ant_template(s: Species, detailed: bool) -> Shape {
                 [(-12, 6), (-36, 40), (-70, 62)],
             ];
             for leg in legs {
-                let p: Vec<Pt> = leg.iter().map(|&(x, y)| (x, y * side)).collect();
-                parts.push(bar(p[0], p[1], 8));
-                parts.push(bar(p[1], p[2], 7));
+                let q: Vec<Pt> = leg
+                    .iter()
+                    .map(|&(x, y)| (x * p.legs / 100, y * side * p.legs / 100))
+                    .collect();
+                parts.push(bar(q[0], q[1], 8));
+                parts.push(bar(q[1], q[2], 7));
             }
             let a0 = (hx + hr / 2, 6 * side);
             let a1 = (hx + hr + 16, 26 * side);
             let a2 = (hx + hr + 42, 24 * side);
             parts.push(bar(a0, a1, 6));
             parts.push(bar(a1, a2, 5));
-        }
-    }
-    parts.push(ellipse(abd.0, 0, abd.1, abd.2, 0, 16));
-    parts.push(ellipse((abd.0 + abd.1 + tho.0 - tho.1) / 2, 0, 10, 8, 0, 8));
-    parts.push(ellipse(tho.0, 0, tho.1, tho.2, 0, 12));
-    match s {
-        Species::Carpenter => {
-            // A square, heavy head.
-            parts.push(vec![
-                (hx - hr, -head.2),
-                (hx + hr - 6, -head.2),
-                (hx + hr, -head.2 + 8),
-                (hx + hr, head.2 - 8),
-                (hx + hr - 6, head.2),
-                (hx - hr, head.2),
-            ]);
-        }
-        _ => parts.push(ellipse(hx, 0, hr, head.2, 0, 14)),
-    }
-    let front = hx + hr;
-    match s {
-        Species::Soldier => {
-            for side in [1, -1] {
-                parts.push(vec![
-                    (front - 8, 12 * side),
-                    (front + 24, 4 * side),
-                    (front + 4, 22 * side),
-                ]);
-            }
-        }
-        Species::Leafcutter => {
-            // The leaf it carries, held up over its head.
-            parts.push(lens((front - 30, 0), 120, 74, 0));
-        }
-        Species::Fire => {
-            parts.push(vec![
-                (abd.0 - abd.1 + 6, -8),
-                (abd.0 - abd.1 - 30, 0),
-                (abd.0 - abd.1 + 6, 8),
-            ]);
-        }
-        Species::Turtle => {
-            // A flat shield across the thorax.
-            parts.push(ellipse(tho.0, 0, 18, 36, 0, 12));
-        }
-        Species::Acid => {
-            // A long, sharp tip to spray from.
-            parts.push(vec![
-                (abd.0 - abd.1 + 14, -18),
-                (abd.0 - abd.1 - 46, 0),
-                (abd.0 - abd.1 + 14, 18),
-            ]);
-        }
-        Species::Nurse => {
-            parts.push(bar((abd.0, -64), (abd.0, 64), 24));
-            parts.push(bar((abd.0 - 64, 0), (abd.0 + 64, 0), 24));
-        }
-        Species::Flying => {
-            for (side, rot) in [(1, STEPS - 5), (-1, 5)] {
-                parts.push(ellipse(-44, 40 * side, 78, 22, rot, 16));
-            }
-        }
-        Species::Exploding => {
-            for k in 0..6 {
-                let st = k * STEPS / 6 + 5;
-                let a = rotate((52, -14), st);
-                let b = rotate((88, 0), st);
-                let c = rotate((52, 14), st);
-                parts.push(vec![
-                    (a.0 + abd.0, a.1),
-                    (b.0 + abd.0, b.1),
-                    (c.0 + abd.0, c.1),
-                ]);
-            }
-        }
-        Species::TrapJaw => {
-            for side in [1, -1] {
-                parts.push(bar((front - 6, 10 * side), (front + 62, 14 * side), 9));
-                parts.push(bar((front + 56, 14 * side), (front + 62, 2 * side), 8));
-            }
-        }
-        Species::Dinosaur => {
-            for side in [1, -1] {
-                parts.push(bar((front - 6, 12 * side), (front + 34, 6 * side), 12));
-            }
-            parts.push(ellipse(tho.0, 0, 20, 30, 0, 10));
-        }
-        Species::Harvester | Species::Carpenter => {
-            for side in [1, -1] {
-                parts.push(bar((front - 4, 8 * side), (front + 14, 4 * side), 8));
-            }
         }
     }
     parts
@@ -516,24 +699,59 @@ fn transform(template: &Shape, num: i32, den: i32, step: usize) -> Shape {
     shape
 }
 
-/// The drawn body radius of a species, in sub-units: a little more than its
-/// physical radius, so small ants stay readable.
+/// The drawn body radius of a species, in sub-units: more than its physical
+/// radius, so small ants stay readable, and more for the stronger species
+/// (by role and Pop Cost), so size alone tells workers from fighters.
 fn drawn_radius(s: Species) -> i32 {
-    s.stats().radius * 5 / 4
+    let pct = match s {
+        Species::Harvester | Species::Leafcutter => 124,
+        Species::Fire => 132,
+        Species::Carpenter => 140,
+        Species::Soldier => 146,
+        Species::Turtle => 140,
+        Species::TrapJaw => 144,
+        Species::Acid | Species::Nurse | Species::Flying | Species::Exploding => 150,
+        Species::Dinosaur => 120,
+    };
+    s.stats().radius * pct / 100
+}
+
+fn heading_step(heading: u8) -> usize {
+    (heading as usize % HEADINGS) * (STEPS / HEADINGS)
 }
 
 /// One species facing one of 16 headings, in sub-units.
 pub fn ant_shape(s: Species, heading: u8, detailed: bool) -> Shape {
-    let step = (heading as usize % HEADINGS) * (STEPS / HEADINGS);
-    transform(&ant_template(s, detailed), drawn_radius(s), 100, step)
+    transform(
+        &ant_template(s, detailed),
+        drawn_radius(s),
+        100,
+        heading_step(heading),
+    )
 }
 
-/// Shape ids: ants first, `[detailed][species][heading]`, then the rest.
+/// A species' dark role mark facing one of 16 headings, in sub-units: drawn
+/// over the body from `MARK_ZOOM`.
+pub fn mark_shape(s: Species, heading: u8) -> Shape {
+    transform(
+        &species_parts(s).mark,
+        drawn_radius(s),
+        100,
+        heading_step(heading),
+    )
+}
+
+/// Shape ids: ants first, `[plain, detailed, mark][species][heading]`,
+/// then the rest.
 pub fn ant_shape_id(s: Species, heading: u8, detailed: bool) -> i32 {
     ((detailed as usize * Species::ALL.len() + s.index()) * HEADINGS + heading as usize % HEADINGS)
         as i32
 }
-const ANT_SHAPES: i32 = (2 * Species::ALL.len() * HEADINGS) as i32;
+
+pub fn mark_shape_id(s: Species, heading: u8) -> i32 {
+    ((2 * Species::ALL.len() + s.index()) * HEADINGS + heading as usize % HEADINGS) as i32
+}
+const ANT_SHAPES: i32 = (3 * Species::ALL.len() * HEADINGS) as i32;
 const SH_QUEEN: i32 = ANT_SHAPES;
 const SH_EGGS: i32 = ANT_SHAPES + 1;
 const SH_CRUMBS: i32 = ANT_SHAPES + 2;
@@ -642,6 +860,11 @@ pub fn shapes() -> Vec<Shape> {
             for h in 0..HEADINGS {
                 out.push(ant_shape(s, h as u8, detailed));
             }
+        }
+    }
+    for s in Species::ALL {
+        for h in 0..HEADINGS {
+            out.push(mark_shape(s, h as u8));
         }
     }
     out.push(queen_shape());
@@ -1421,16 +1644,46 @@ fn ink_width(z: i32) -> i32 {
     (z / 8).clamp(6, 24)
 }
 
-fn progress(s: &Structure) -> i32 {
-    let cost: i32 = s.cost.iter().sum();
-    let got: i32 = s.delivered.iter().sum();
-    let paid = if cost > 0 { got * 1000 / cost } else { 1000 };
-    let built = if s.work > 0 {
-        s.work_done * 1000 / s.work
+/// How much of a blueprint's build work is done, in permille: its progress
+/// pie, which grows a little with every tick of work.
+fn built(s: &Structure) -> i32 {
+    if s.work > 0 {
+        (s.work_done as i64 * 1000 / s.work as i64) as i32
     } else {
         1000
-    };
-    (paid + built) / 2
+    }
+}
+
+/// How much of a blueprint's cost has been delivered, in permille: the bright
+/// rim drawn round it as resources arrive.
+fn paid(s: &Structure) -> i32 {
+    let cost: i32 = s.cost.iter().sum();
+    let got: i32 = s.delivered.iter().sum();
+    if cost > 0 {
+        (got as i64 * 1000 / cost as i64) as i32
+    } else {
+        1000
+    }
+}
+
+/// Cell `k` of `n` in a wall line's share of a whole-line permille: the line
+/// fills cell by cell.
+fn cell_share(permille: i32, k: i32, n: i32) -> i32 {
+    (permille * n - 1000 * k).clamp(0, 1000)
+}
+
+/// A blueprint's outline: thin and dark, with the delivered part (from the
+/// top, clockwise) traced over it in the player colour.
+fn delivery_rim(list: &mut List, b: Body, at: Pt, r: i32, paid: i32, colony: u8) {
+    let ink = ink_width(list.cam.units_per_cell());
+    let unit = body_unit(b);
+    list.outline(C_INK, ink, &scaled(&unit, at.0, at.1, r));
+    if paid >= 1000 {
+        list.outline(player(colony), ink * 2, &scaled(&unit, at.0, at.1, r));
+    } else if paid > 0 {
+        let rim = pie(b, at.0, at.1, r, paid);
+        list.line(player(colony), ink * 2, &rim[1..]);
+    }
 }
 
 /// The dark icon on a structure.
@@ -1459,14 +1712,15 @@ fn draw_structure(list: &mut List, sight: &Sight, world: &World, s: &Structure) 
     if s.kind == StructureKind::Wall && !s.complete {
         // A wall blueprint: every cell of its line, filling as it is built.
         let r = cam.length(CELL / 2);
-        let p = progress(s);
-        for &(cx, cy) in &s.cells {
+        let (work, got, n) = (built(s), paid(s), s.cells.len() as i32);
+        for (k, &(cx, cy)) in s.cells.iter().enumerate() {
             let (x, y) = cam.screen(Pos::of_cell(cx, cy));
             if !list.on_screen(x, y, r) {
                 continue;
             }
-            list.poly(soft(s.colony), &pie(body, x, y, r, p));
-            list.outline(player(s.colony), ink, &scaled(&unit, x, y, r));
+            let k = k as i32;
+            list.poly(soft(s.colony), &pie(body, x, y, r, cell_share(work, k, n)));
+            delivery_rim(list, body, (x, y), r, cell_share(got, k, n), s.colony);
         }
         return;
     }
@@ -1483,8 +1737,8 @@ fn draw_structure(list: &mut List, sight: &Sight, world: &World, s: &Structure) 
         list.outline(C_INK, ink, &full);
         icon(list, s.kind, x, y, cam.shape_scale(), C_ICON);
     } else {
-        list.poly(soft(s.colony), &pie(body, x, y, r, progress(s)));
-        list.outline(player(s.colony), ink, &full);
+        list.poly(soft(s.colony), &pie(body, x, y, r, built(s)));
+        delivery_rim(list, body, (x, y), r, paid(s), s.colony);
         icon(list, s.kind, x, y, cam.shape_scale(), soft(s.colony));
     }
 }
@@ -1516,34 +1770,190 @@ fn draw_node(list: &mut List, sight: &Sight, n: &crate::world::Node) {
     }
 }
 
-fn draw_effect(list: &mut List, e: &crate::world::Effect, blasts: bool) {
+/// Ticks an effect of this kind lasts (as `World::strike` and the Nurse
+/// Ant's heal set `until`).
+fn effect_life(kind: EffectKind) -> i32 {
+    match kind {
+        EffectKind::Bite | EffectKind::Spray => 2,
+        EffectKind::Heal => 3,
+        EffectKind::Blast => 4,
+    }
+}
+
+/// How far through its life an effect is, in permille, between ticks.
+fn effect_phase(e: &crate::world::Effect, tick: i32, interp: i32) -> i32 {
+    let life = effect_life(e.kind);
+    let age = (life - (e.until - tick)).clamp(0, life - 1);
+    ((age * 1000 + interp) / life).clamp(0, 999)
+}
+
+/// The Splash radius of a blast in sub-units: a Dinosaur Ant's if one of the
+/// colony's stands where the blast came from, otherwise an Exploding Ant's,
+/// with the colony's upgrades.
+fn blast_radius(world: &World, e: &crate::world::Effect) -> i32 {
+    let reach = (2 * CELL) as i64;
+    let dino = world.ants.iter().any(|a| {
+        a.colony == e.colony
+            && a.species == Species::Dinosaur
+            && a.pos.dist2(e.from) <= reach * reach
+    });
+    let s = if dino {
+        Species::Dinosaur
+    } else {
+        Species::Exploding
+    };
+    match world.colonies.get(e.colony as usize) {
+        Some(c) => c.ranks.apply(s).splash,
+        None => s.stats().splash,
+    }
+}
+
+/// The unit vector (scaled by `TRIG_ONE`) from a to b; east when they meet.
+fn unit(a: Pt, b: Pt) -> Pt {
+    let (dx, dy) = ((b.0 - a.0) as i64, (b.1 - a.1) as i64);
+    let len = isqrt((dx * dx + dy * dy) as u64) as i64;
+    if len == 0 {
+        return (TRIG_ONE, 0);
+    }
+    (
+        (dx * TRIG_ONE as i64 / len) as i32,
+        (dy * TRIG_ONE as i64 / len) as i32,
+    )
+}
+
+/// p + u·a + v·b, where u and v are unit vectors scaled by `TRIG_ONE`.
+fn along(p: Pt, u: Pt, a: i32, v: Pt, b: i32) -> Pt {
+    (
+        p.0 + (u.0 * a + v.0 * b) / TRIG_ONE,
+        p.1 + (u.1 * a + v.1 * b) / TRIG_ONE,
+    )
+}
+
+/// A plus sign of half-size `d` and arm thickness `t` around (x, y).
+fn plus(x: i32, y: i32, d: i32, t: i32) -> Vec<Pt> {
+    let h = t / 2;
+    vec![
+        (x - h, y - d),
+        (x + h, y - d),
+        (x + h, y - h),
+        (x + d, y - h),
+        (x + d, y + h),
+        (x + h, y + h),
+        (x + h, y + d),
+        (x - h, y + d),
+        (x - h, y + h),
+        (x - d, y + h),
+        (x - d, y - h),
+        (x - h, y - h),
+    ]
+}
+
+/// One hit, `phase` permille through its life. `under` is the pass drawn
+/// below the ants (the blast's flash on the ground); the rest is drawn over
+/// them. Each kind has its own look: a Bite snaps a pair of jaws shut in the
+/// attacker's colour with a white flash on the target, a Spray lobs a green
+/// droplet that splats, a Blast throws out a ring as wide as its Splash and
+/// a Heal sends a green plus rising from the healed ant.
+fn draw_effect(list: &mut List, e: &crate::world::Effect, phase: i32, splash: i32, under: bool) {
     let cam = list.cam;
-    let (x, y) = cam.screen(e.to);
-    let r = cam.length(CELL * 2);
-    if !list.on_screen(x, y, r) {
+    let z = cam.units_per_cell();
+    let to = cam.screen(e.to);
+    let reach = cam.length(splash.max(CELL * 2));
+    if !list.on_screen(to.0, to.1, reach) {
         return;
     }
     let px = SUB_PX;
-    match (e.kind, blasts) {
-        (EffectKind::Blast, true) => list.poly(C_BLAST, &circle(x, y, r * 4 / 5, 20)),
+    let fade = 1000 - phase;
+    match (e.kind, under) {
+        (EffectKind::Blast, true) => {
+            if phase < 500 {
+                let r = cam.length(splash) * (500 + phase) / 1000;
+                list.poly(C_BLAST, &circle(to.0, to.1, r, 24));
+            }
+        }
+        (EffectKind::Blast, false) => {
+            let r = cam.length(splash) * (300 + phase * 7 / 10) / 1000;
+            let w = (px * 4 * fade / 1000).max(px);
+            list.outline(C_BLAST_RING, w, &circle(to.0, to.1, r.max(px * 2), 24));
+        }
         (EffectKind::Bite, false) => {
-            let d = cam.length(CELL * 2 / 5);
-            list.line(C_BITE, px * 3 / 2, &[(x - d, y - d), (x + d, y + d)]);
-            list.line(C_BITE, px * 3 / 2, &[(x - d, y + d), (x + d, y - d)]);
+            let l = cam.length(CELL * 3 / 4).max(px * 4);
+            if phase < 600 {
+                let r = l * (750 - phase) / 1000 + px;
+                list.poly(C_BITE, &star(to.0, to.1, r, r / 3, 4));
+            }
+            if z < OUTLINE_ZOOM {
+                return;
+            }
+            // Two jaws either side of the target, closing as the bite lands.
+            let from = cam.screen(e.from);
+            let u = unit(from, to);
+            let v = (-u.1, u.0);
+            let open = l * (300 + fade * 5 / 10) / 1000;
+            let base = along(to, u, -l * 3 / 4, v, 0);
+            for side in [1, -1] {
+                let jaw = [
+                    along(base, u, 0, v, side * open / 2),
+                    along(base, u, l * 2 / 3, v, side * (open + l / 4)),
+                    along(base, u, l * 3 / 2, v, side * open / 3),
+                ];
+                list.line(C_INK, px * 3, &jaw);
+                list.line(player(e.colony), px * 3 / 2, &jaw);
+            }
         }
         (EffectKind::Spray, false) => {
             let from = cam.screen(e.from);
-            list.line(C_ACID, px * 2, &[from, (x, y)]);
-            list.poly(C_ACID, &circle(x, y, cam.length(CELL / 3), 8));
+            // The droplet flies for the first 60% of the effect, on a lob a
+            // quarter as high as it is long, then splats.
+            let (dx, dy) = ((to.0 - from.0) as i64, (to.1 - from.1) as i64);
+            let height = (isqrt((dx * dx + dy * dy) as u64) / 4) as i32;
+            let at = |t: i32| {
+                let lift = (height as i64 * 4 * t as i64 * (1000 - t) as i64 / 1_000_000) as i32;
+                (
+                    from.0 + (dx * t as i64 / 1000) as i32,
+                    from.1 + (dy * t as i64 / 1000) as i32 - lift,
+                )
+            };
+            let t = (phase * 1000 / 600).min(1000);
+            let drop = cam.length(CELL / 6).max(px * 2);
+            if t < 1000 {
+                let trail: Vec<Pt> = (0..=4).map(|k| at((t - 400 + k * 100).max(0))).collect();
+                list.line(C_ACID, (drop * 2 / 3).max(px), &trail);
+                let p = at(t);
+                list.poly(C_ACID, &circle(p.0, p.1, drop, 8));
+            } else {
+                let r = drop + cam.length(CELL / 2) * (phase - 600) / 400;
+                list.poly(C_ACID, &star(to.0, to.1, r, r / 2, 6));
+            }
         }
         (EffectKind::Heal, false) => {
-            let from = cam.screen(e.from);
-            let d = cam.length(CELL / 3);
-            list.line(C_HEAL, px * 3 / 2, &[from, (x, y)]);
-            list.line(C_HEAL, px * 2, &[(x - d, y), (x + d, y)]);
-            list.line(C_HEAL, px * 2, &[(x, y - d), (x, y + d)]);
+            if phase < 400 {
+                let from = cam.screen(e.from);
+                list.line(C_HEAL, px, &[from, to]);
+            }
+            let rise = cam.length(CELL * 3 / 4) * phase / 1000;
+            let d = cam.length(CELL / 3).max(px * 3);
+            let p = plus(to.0, to.1 - rise, d, d * 3 / 4);
+            list.poly(C_HEAL, &p);
+            list.outline(C_INK, px, &p);
         }
         _ => {}
+    }
+}
+
+/// One ant at the camera's zoom: its body in `fill`, a dark outline once
+/// the zoom allows, and its role mark from `MARK_ZOOM`.
+fn draw_ant(list: &mut List, s: Species, heading: u8, at: Pt, scale: i32, fill: i32) {
+    let z = list.cam.units_per_cell();
+    let id = ant_shape_id(s, heading, z >= DETAIL_ZOOM);
+    if z >= OUTLINE_ZOOM {
+        list.shape(id, at.0, at.1, scale, fill, C_INK, ink_width(z) * 2 / 3);
+    } else {
+        // Too small for an outline: it would only darken the colour.
+        list.fill_shape(id, at.0, at.1, scale, fill);
+    }
+    if z >= MARK_ZOOM {
+        list.fill_shape(mark_shape_id(s, heading), at.0, at.1, scale, C_INK);
     }
 }
 
@@ -1621,50 +2031,63 @@ pub fn frame(
     for s in &world.structures {
         draw_structure(&mut list, &sight, world, s);
     }
-    let effect_shown = |e: &crate::world::Effect| sight.shows(world, e.colony, e.to);
-    for e in world.effects.iter().filter(|e| effect_shown(e)) {
-        draw_effect(&mut list, e, true);
+    // Hits on screen, with how far through its life each is and, for a
+    // blast, its Splash radius.
+    let effects: Vec<(&crate::world::Effect, i32, i32)> = world
+        .effects
+        .iter()
+        .filter(|e| sight.shows(world, e.colony, e.to))
+        .map(|e| {
+            let splash = if e.kind == EffectKind::Blast {
+                blast_radius(world, e)
+            } else {
+                0
+            };
+            (e, effect_phase(e, world.tick, interp as i32), splash)
+        })
+        .collect();
+    for &(e, phase, splash) in &effects {
+        draw_effect(&mut list, e, phase, splash, true);
     }
 
     // Ants.
-    let detailed = z >= DETAIL_ZOOM;
     let base_scale = cam.shape_scale();
+    let radii = Species::ALL.map(drawn_radius);
     for a in &world.ants {
         let p = Pos::new(
             a.prev.x + ((a.pos.x - a.prev.x) as i64 * interp / 1000) as i32,
             a.prev.y + ((a.pos.y - a.prev.y) as i64 * interp / 1000) as i32,
         );
         let (x, y) = cam.screen(p);
-        let r = cam.length(drawn_radius(a.species) * 3).max(z);
+        let radius = radii[a.species.index()];
+        let r = cam.length(radius * 3).max(z);
         if !list.on_screen(x, y, r) || !sight.shows(world, a.colony, p) {
             continue;
         }
-        let id = ant_shape_id(a.species, a.heading, detailed);
-        if z >= OUTLINE_ZOOM {
-            list.shape(id, x, y, base_scale, player(a.colony), C_INK, ink * 2 / 3);
-        } else {
-            // Too small for an outline: it would only darken the colour.
-            list.fill_shape(id, x, y, base_scale, player(a.colony));
-        }
+        draw_ant(
+            &mut list,
+            a.species,
+            a.heading,
+            (x, y),
+            base_scale,
+            player(a.colony),
+        );
         let carried = a.carried();
         if carried > 0 && z >= 48 {
             let most = (0..3).max_by_key(|&i| a.inventory[i]).unwrap_or(0);
             let colour = [C_CRUMB, C_POLLEN, C_LEAF][most];
             let step = a.heading as usize * (STEPS / HEADINGS);
-            let d = cam.length(drawn_radius(a.species) * 7 / 10);
+            let d = cam.length(radius * 7 / 10);
             let (hx, hy) = (
                 x + d * cos64(step) / TRIG_ONE,
                 y + d * sin64(step) / TRIG_ONE,
             );
-            list.poly(
-                colour,
-                &circle(hx, hy, cam.length(drawn_radius(a.species) * 2 / 5), 8),
-            );
+            list.poly(colour, &circle(hx, hy, cam.length(radius * 2 / 5), 8));
         }
     }
 
-    for e in world.effects.iter().filter(|e| effect_shown(e)) {
-        draw_effect(&mut list, e, false);
+    for &(e, phase, splash) in &effects {
+        draw_effect(&mut list, e, phase, splash, false);
     }
 
     if !sight.all {
@@ -1701,6 +2124,38 @@ pub fn frame(
     list.out
 }
 
+/// The bounding box of a shape: (min x, min y, max x, max y).
+fn bounds(shape: &Shape) -> (i32, i32, i32, i32) {
+    let mut b = (i32::MAX, i32::MAX, i32::MIN, i32::MIN);
+    for &(x, y) in shape.iter().flatten() {
+        b = (b.0.min(x), b.1.min(y), b.2.max(x), b.3.max(y));
+    }
+    if b.0 > b.2 {
+        (0, 0, 0, 0)
+    } else {
+        b
+    }
+}
+
+/// Where and at what scale index to draw a shape so that its real bounding
+/// box (legs and antennae included) fits a square of `side` draw-list units
+/// centred on `at`.
+fn fit_box(b: (i32, i32, i32, i32), at: Pt, side: i32) -> (Pt, i32) {
+    let span = (b.2 - b.0).max(b.3 - b.1).max(1);
+    let scale = (side as i64 * SCALE_ONE as i64 / span as i64) as i32;
+    let scale = scale.clamp(1, SCALE_MAX);
+    let mid = ((b.0 + b.2) / 2, (b.1 + b.3) / 2);
+    let off = |m: i32| (m as i64 * scale as i64 / SCALE_ONE as i64) as i32;
+    ((at.0 - off(mid.0), at.1 - off(mid.1)), scale)
+}
+
+/// The bounding box of every species' plain shape facing up, worked out
+/// once: waypoint flags fit their icons with it every frame.
+fn flag_bounds() -> &'static [(i32, i32, i32, i32); 12] {
+    static CACHE: std::sync::OnceLock<[(i32, i32, i32, i32); 12]> = std::sync::OnceLock::new();
+    CACHE.get_or_init(|| Species::ALL.map(|s| bounds(&ant_shape(s, UP, false))))
+}
+
 fn draw_waypoints(list: &mut List, world: &World, viewer: u8, hover: Option<Pos>) {
     let cam = list.cam;
     let z = cam.units_per_cell();
@@ -1714,36 +2169,47 @@ fn draw_waypoints(list: &mut List, world: &World, viewer: u8, hover: Option<Pos>
         }
     }
     let colour = player(viewer);
+    // One icon box on the flag's cloth per species sent here: about a cell,
+    // kept between 12 and 18 pixels so the flag stays a marker at any zoom.
+    let cell = (cam.length(CELL) * 3 / 4).clamp(SUB_PX * 12, SUB_PX * 18);
     for ((wx, wy), species) in at {
         let (x, y) = cam.screen(Pos::new(wx, wy));
-        let pole = cam.length(CELL * 2).max(SUB_PX * 14);
-        let reach = pole * 3;
-        if !list.on_screen(x, y, reach) {
+        let n = species.len() as i32;
+        let (cols, rows) = (n.clamp(1, 3), (n + 2) / 3);
+        let pad = cell / 6;
+        let (cloth_w, cloth_h) = (cols * cell + 2 * pad, rows * cell + 2 * pad);
+        let pole = cloth_h + cell;
+        if !list.on_screen(x, y, pole + cloth_w) {
             continue;
         }
         if hover == Some(Pos::new(wx, wy)) {
-            list.outline(C_HOVER, SUB_PX * 2, &circle(x, y, pole * 3 / 4, 24));
+            list.outline(C_HOVER, SUB_PX * 2, &circle(x, y, cell, 24));
         }
-        list.line(C_POLE, ink * 2, &[(x, y), (x, y - pole)]);
-        let flag = [
-            (x, y - pole),
-            (x + pole * 2 / 3, y - pole + pole / 4),
-            (x, y - pole + pole / 2),
+        let top = y - pole;
+        list.line(C_POLE, ink * 2, &[(x, y), (x, top)]);
+        // A swallow-tailed pennant in the player colour.
+        let notch = cell / 3;
+        let cloth = [
+            (x, top),
+            (x + cloth_w + notch, top),
+            (x + cloth_w, top + cloth_h / 2),
+            (x + cloth_w + notch, top + cloth_h),
+            (x, top + cloth_h),
         ];
-        list.poly(colour, &flag);
-        list.outline(C_INK, ink, &flag);
-        list.poly(C_INK, &circle(x, y, pole / 8, 8));
-        // A species icon for each species sent here, four to a row.
-        let gap = pole * 3 / 4;
+        list.poly(colour, &cloth);
+        list.outline(C_INK, ink, &cloth);
+        list.poly(C_INK, &circle(x, y, cell / 5, 8));
+        // Each species printed on the cloth in ink, three to a row, so it
+        // never looks like an ant standing on the ground.
         for (i, s) in species.iter().enumerate() {
-            let (col, row) = ((i % 4) as i32, (i / 4) as i32);
-            let ix = x + gap * col - gap * 3 / 2;
-            let iy = y + gap * (row + 1);
-            // Shapes are about 2.3 drawn radii long; this makes the icon
-            // about 0.9 of the gap.
-            let k = gap * 420 / drawn_radius(*s).max(1);
-            let id = ant_shape_id(*s, UP, z >= DETAIL_ZOOM);
-            list.shape(id, ix, iy, k, colour, C_INK, ink);
+            let (col, row) = ((i % 3) as i32, (i / 3) as i32);
+            let centre = (
+                x + pad + col * cell + cell / 2,
+                top + pad + row * cell + cell / 2,
+            );
+            let b = flag_bounds()[s.index()];
+            let (p, scale) = fit_box(b, centre, cell * 9 / 10);
+            list.fill_shape(ant_shape_id(*s, UP, false), p.0, p.1, scale, C_INK);
         }
     }
 }
@@ -1833,15 +2299,135 @@ pub fn minimap(world: &World, viewer: Option<u8>, cam: &Camera, size: i32) -> Ve
     out
 }
 
+/// Every species side by side, for review (TRIAGE row 17): rows at 8, 12
+/// and 24 pixels per cell, each first in red and then in blue, the species
+/// in `Species::ALL` order, facing up, on floor-coloured panels, drawn
+/// exactly as `frame` draws ants at those zooms.
+pub fn species_gallery(view_w: i32, view_h: i32) -> Vec<i32> {
+    let mut out = vec![op::CLEAR, C_BACKDROP];
+    let mut top = SUB_PX * 8;
+    for zoom in [10, 12, 14] {
+        let mut cam = Camera::new(view_w, view_h);
+        cam.zoom = zoom;
+        let z = cam.units_per_cell();
+        let (col, row) = (z * 3, z * 11 / 2);
+        for colony in [0u8, 1] {
+            let mut list = List {
+                out: Vec::new(),
+                cam: &cam,
+                w: view_w * SUB_PX,
+                h: view_h * SUB_PX,
+            };
+            let left = SUB_PX * 8;
+            let right = left + col * Species::ALL.len() as i32;
+            list.poly(
+                C_FLOOR,
+                &[
+                    (left, top),
+                    (right, top),
+                    (right, top + row),
+                    (left, top + row),
+                ],
+            );
+            for (i, s) in Species::ALL.iter().enumerate() {
+                let at = (left + col * i as i32 + col / 2, top + row / 2);
+                draw_ant(&mut list, *s, UP, at, cam.shape_scale(), player(colony));
+            }
+            out.extend(list.out);
+            top += row + SUB_PX * 4;
+        }
+        top += SUB_PX * 8;
+    }
+    // Then every hit kind at 12 pixels per cell, at the start, a quarter,
+    // half and three quarters of its life: the attacker (red) on the left,
+    // the target on the right.
+    let mut cam = Camera::new(view_w, view_h);
+    cam.zoom = 12;
+    let z = cam.units_per_cell();
+    let (col, row) = (z * 7, z * 6);
+    let left = SUB_PX * 8;
+    let mut list = List {
+        out: Vec::new(),
+        cam: &cam,
+        w: view_w * SUB_PX,
+        h: view_h * SUB_PX,
+    };
+    let kinds = [
+        (EffectKind::Bite, Species::Soldier, 2),
+        (EffectKind::Spray, Species::Acid, 3),
+        (EffectKind::Blast, Species::Exploding, 1),
+        (EffectKind::Heal, Species::Nurse, 3),
+    ];
+    let right = left + col * 16;
+    list.poly(
+        C_FLOOR,
+        &[
+            (left, top),
+            (right, top),
+            (right, top + row),
+            (left, top + row),
+        ],
+    );
+    for (k, &(kind, s, gap)) in kinds.iter().enumerate() {
+        for (j, phase) in [0, 250, 500, 750].into_iter().enumerate() {
+            let i = (k * 4 + j) as i32;
+            let (cx, cy) = (left + col * i + col / 2, top + row / 2);
+            let from_at = (cx - z * gap / 2, cy);
+            let to_at = (cx + z * gap / 2, cy);
+            let e = crate::world::Effect {
+                kind,
+                from: cam.world_at(from_at.0 / SUB_PX, from_at.1 / SUB_PX),
+                to: cam.world_at(to_at.0 / SUB_PX, to_at.1 / SUB_PX),
+                until: 0,
+                colony: 0,
+            };
+            let splash = if kind == EffectKind::Blast {
+                s.stats().splash
+            } else {
+                0
+            };
+            let target = if kind == EffectKind::Heal { 0 } else { 1 };
+            draw_effect(&mut list, &e, phase, splash, true);
+            draw_ant(&mut list, s, 0, from_at, cam.shape_scale(), player(0));
+            let (h, scale) = (Species::Harvester, cam.shape_scale());
+            draw_ant(&mut list, h, 8, to_at, scale, player(target));
+            draw_effect(&mut list, &e, phase, splash, false);
+        }
+    }
+    out.extend(list.out);
+    out
+}
+
 #[cfg(test)]
 #[path = "render_tests.rs"]
 mod tests;
 
 // ---- icons ----
 
+/// A straight arrow from `tail` to `tip`: shaft `t` thick, head `head`
+/// wide and long.
+fn arrow(tail: Pt, tip: Pt, t: i32, head: i32) -> Vec<Pt> {
+    let u = unit(tail, tip);
+    let v = (-u.1, u.0);
+    let (dx, dy) = ((tip.0 - tail.0) as i64, (tip.1 - tail.1) as i64);
+    let len = isqrt((dx * dx + dy * dy) as u64) as i32;
+    let neck = along(tail, u, len - head, v, 0);
+    vec![
+        along(tail, u, 0, v, -t / 2),
+        along(neck, u, 0, v, -t / 2),
+        along(neck, u, 0, v, -head / 2),
+        tip,
+        along(neck, u, 0, v, head / 2),
+        along(neck, u, 0, v, t / 2),
+        along(tail, u, 0, v, t / 2),
+    ]
+}
+
 /// The draw list for one interface icon, `size` × `size` pixels, in the
 /// colony's player colour: a species, structure, upgrade or action key as
 /// used by the action grid and the queue bar. `None` for an unknown key.
+/// Every shape is sized from its real bounding box (legs and antennae
+/// included), so it stays inside the image.
 pub fn icon_list(key: &str, colony: u8, size: i32) -> Option<Vec<i32>> {
     let cam = Camera::new(size, size);
     let mut list = List {
@@ -1850,34 +2436,52 @@ pub fn icon_list(key: &str, colony: u8, size: i32) -> Option<Vec<i32>> {
         w: size * SUB_PX,
         h: size * SUB_PX,
     };
-    let c = size * SUB_PX / 2;
+    let full = size * SUB_PX;
+    let c = full / 2;
     let colour = player(colony);
-    // A shape spanning about `span` shape units fills 80% of the icon.
-    let fit = |span: i32| size * SUB_PX * SCALE_ONE * 4 / 5 / span.max(1);
+    // Shapes fill 84% of the icon, leaving room for the outline.
+    let side = full * 84 / 100;
     let ant = |list: &mut List, s: Species| {
-        let r = drawn_radius(s);
+        let mut both = ant_shape(s, UP, true);
+        both.extend(mark_shape(s, UP));
+        let (p, scale) = fit_box(bounds(&both), (c, c), side);
         list.shape(
             ant_shape_id(s, UP, true),
-            c,
-            c,
-            fit(2 * r),
+            p.0,
+            p.1,
+            scale,
             colour,
             C_INK,
             24,
         );
+        list.fill_shape(mark_shape_id(s, UP), p.0, p.1, scale, C_INK);
     };
     let body = |list: &mut List, kind: StructureKind| {
-        let rr = size * SUB_PX * 9 / 20;
+        let rr = full * 9 / 20;
         let pts: Vec<Pt> = body_unit(body_of(kind))
             .into_iter()
             .map(|(x, y)| (c + x * rr / TRIG_ONE, c + y * rr / TRIG_ONE))
             .collect();
         list.poly(soft(colony), &pts);
-        list.outline(colour, size * SUB_PX / 16, &pts);
+        list.outline(colour, full / 16, &pts);
     };
-    let shape = |list: &mut List, id: i32, span: i32, fill: i32| {
-        list.shape(id, c, c, fit(span), fill, C_INK, 24);
-    };
+    // A fixed shape fitted into a square of `side` centred on `at`, in
+    // `fill` with a dark outline; `extra` shares its box (pollen on petals).
+    let item =
+        |list: &mut List, id: i32, at: Pt, side: i32, fill: i32, extra: Option<(i32, i32)>| {
+            let shape = match id {
+                SH_QUEEN => queen_shape(),
+                SH_CRUMBS => crumbs_shape(),
+                SH_PETALS => petals_shape(),
+                _ => leaves_shape(),
+            };
+            let (p, scale) = fit_box(bounds(&shape), at, side);
+            let width = (24 * side / full).max(12);
+            list.shape(id, p.0, p.1, scale, fill, C_INK, width);
+            if let Some((id2, fill2)) = extra {
+                list.shape(id2, p.0, p.1, scale, fill2, C_INK, width);
+            }
+        };
     if let Some(s) = key.strip_prefix("species.").and_then(Species::from_key) {
         ant(&mut list, s);
         return Some(list.out);
@@ -1890,10 +2494,11 @@ pub fn icon_list(key: &str, colony: u8, size: i32) -> Option<Vec<i32>> {
     if let Some(rest) = key.strip_prefix("structure.") {
         let kind = StructureKind::from_key(rest)?;
         body(&mut list, kind);
-        let scale = fit(CELL * 3);
+        let scale = full * SCALE_ONE * 4 / 5 / (CELL * 3);
         icon(&mut list, kind, c, c, scale, C_INK);
         return Some(list.out);
     }
+    let nectar = Some((SH_POLLEN, C_POLLEN));
     let s = match key {
         "upgrade.damage" => Species::TrapJaw,
         "upgrade.armor" => Species::Turtle,
@@ -1902,24 +2507,77 @@ pub fn icon_list(key: &str, colony: u8, size: i32) -> Option<Vec<i32>> {
         "upgrade.carry_capacity" => Species::Leafcutter,
         "upgrade.build_rate" => Species::Carpenter,
         "action.all_ants" => Species::Soldier,
-        "action.evolve" | "action.retreat" => {
-            shape(&mut list, SH_QUEEN, 180, colour);
+        "action.evolve" => {
+            // The queen with an arrow up: on to the next tier.
+            item(
+                &mut list,
+                SH_QUEEN,
+                (full * 2 / 5, full * 3 / 5),
+                full * 7 / 10,
+                colour,
+                None,
+            );
+            let a = arrow(
+                (full * 4 / 5, full * 4 / 5),
+                (full * 4 / 5, full / 10),
+                full / 7,
+                full * 3 / 10,
+            );
+            list.poly(colour, &a);
+            list.outline(C_INK, full / 24, &a);
+            return Some(list.out);
+        }
+        "action.retreat" => {
+            // An arrow running home to the queen.
+            item(
+                &mut list,
+                SH_QUEEN,
+                (full / 4, full / 2),
+                full / 2,
+                colour,
+                None,
+            );
+            let a = arrow(
+                (full * 19 / 20, full / 2),
+                (full * 9 / 20, full / 2),
+                full / 7,
+                full * 3 / 10,
+            );
+            list.poly(colour, &a);
+            list.outline(C_INK, full / 24, &a);
             return Some(list.out);
         }
         "focus.food" => {
-            shape(&mut list, SH_CRUMBS, 220, C_INK);
+            item(&mut list, SH_CRUMBS, (c, c), side, C_CRUMB, None);
             return Some(list.out);
         }
         "focus.nectar" => {
-            shape(&mut list, SH_PETALS, 220, colour);
+            item(&mut list, SH_PETALS, (c, c), side, C_PETAL, nectar);
             return Some(list.out);
         }
         "focus.leaves" => {
-            shape(&mut list, SH_LEAVES, 220, colour);
+            item(&mut list, SH_LEAVES, (c, c), side, C_LEAF, None);
             return Some(list.out);
         }
         "focus.balanced" => {
-            shape(&mut list, SH_POLLEN, 220, colour);
+            let small = full * 9 / 20;
+            item(
+                &mut list,
+                SH_CRUMBS,
+                (full / 4, full * 3 / 10),
+                small,
+                C_CRUMB,
+                None,
+            );
+            item(
+                &mut list,
+                SH_PETALS,
+                (full * 3 / 4, full * 3 / 10),
+                small,
+                C_PETAL,
+                nectar,
+            );
+            item(&mut list, SH_LEAVES, (c, full * 3 / 4), small, C_LEAF, None);
             return Some(list.out);
         }
         _ => return None,

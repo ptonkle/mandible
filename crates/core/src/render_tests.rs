@@ -213,8 +213,31 @@ fn health_pie_shrinks_with_health() {
     );
 }
 
+/// Total length of the player-colour rim lines in a draw list, and whether a
+/// closed player-colour rim (a whole outline) is there.
+fn rim(list: &[i32], colony: u8) -> (i64, bool) {
+    let mut len = 0;
+    let mut closed = false;
+    for (code, a) in decode(list) {
+        if a[0] != player(colony) {
+            continue;
+        }
+        if code == op::OUTLINE {
+            closed = true;
+        }
+        if code == op::LINE {
+            let pts: Vec<Pt> = a[3..].chunks(2).map(|c| (c[0], c[1])).collect();
+            for p in pts.windows(2) {
+                let (dx, dy) = ((p[1].0 - p[0].0) as i64, (p[1].1 - p[0].1) as i64);
+                len += isqrt((dx * dx + dy * dy) as u64) as i64;
+            }
+        }
+    }
+    (len, closed)
+}
+
 #[test]
-fn a_blueprint_shows_its_progress_and_a_wall_its_colour() {
+fn a_blueprint_pie_fills_smoothly_with_work_and_its_rim_with_delivery() {
     let mut w = world(Format::OneVOne);
     let q = w.structures[queen_of(&w, 0)].pos;
     let (qx, qy) = q.cell();
@@ -233,26 +256,78 @@ fn a_blueprint_shows_its_progress_and_a_wall_its_colour() {
         true,
     );
     let cam = camera_on(q, 10);
+    let draw = |w: &World| frame(w, Some(0), &cam, &Overlay::default(), 0);
     let soft_area = |w: &World| -> i64 {
-        decode(&frame(w, Some(0), &cam, &Overlay::default(), 0))
+        decode(&draw(w))
             .into_iter()
             .filter(|(code, a)| *code == op::POLY && a[0] == soft(0))
             .map(|(_, a)| area(&a[2..]))
             .sum()
     };
-    assert_eq!(soft_area(&w), 0, "nothing delivered yet");
     let si = w.structure_index(id).unwrap();
-    w.structures[si].delivered = w.structures[si].cost;
-    let half = soft_area(&w);
-    w.structures[si].work_done = w.structures[si].work;
-    let full = soft_area(&w);
-    assert!(half > 0 && full > half * 3 / 2, "{half} {full}");
+    assert_eq!(soft_area(&w), 0, "no work done yet");
+    assert_eq!(rim(&draw(&w), 0), (0, false), "nothing delivered yet");
+    // Delivery brightens the rim, a part at a time, and never the pie.
+    let cost = w.structures[si].cost;
+    w.structures[si].delivered = [cost[0] / 2, cost[1] / 2, cost[2] / 2];
+    let (half_rim, closed) = rim(&draw(&w), 0);
+    assert!(half_rim > 0 && !closed, "half delivered: an open rim");
+    assert_eq!(soft_area(&w), 0, "delivery alone fills no pie");
+    w.structures[si].delivered = cost;
+    assert!(rim(&draw(&w), 0).1, "all delivered: the whole rim");
+    // Build work fills the pie a little with every tick of work.
+    let work = w.structures[si].work;
+    let mut areas = Vec::new();
+    for done in 0..=work {
+        w.structures[si].work_done = done;
+        areas.push(soft_area(&w));
+    }
+    let full = areas[work as usize];
+    let half = areas[work as usize / 2];
+    assert!(
+        (full * 45 / 100..=full * 55 / 100).contains(&half),
+        "half the work fills half the pie: {half} of {full}"
+    );
+    let jump = areas.windows(2).map(|p| p[1] - p[0]).max().unwrap();
+    assert!(
+        areas.windows(2).all(|p| p[1] >= p[0]) && jump <= full * 3 / work as i64,
+        "the pie never shrinks or jumps: largest step {jump} of {full} over {work} ticks"
+    );
     // The wall is a player-colour square, distinct from rock.
-    let walls = decode(&frame(&w, Some(0), &cam, &Overlay::default(), 0))
+    let walls = decode(&draw(&w))
         .into_iter()
         .filter(|(code, a)| *code == op::POLY && a[0] == player(0) && a[1] == 4)
         .count();
     assert_eq!(walls, 1);
+}
+
+#[test]
+fn a_wall_blueprint_fills_cell_by_cell() {
+    let mut w = world(Format::OneVOne);
+    let q = w.structures[queen_of(&w, 0)].pos;
+    let (qx, qy) = q.cell();
+    let cells: Vec<(i32, i32)> = (0..4).map(|k| (qx + 4 + k, qy + 4)).collect();
+    let id = w.add_structure(
+        0,
+        StructureKind::Wall,
+        Pos::of_cell(qx + 5, qy + 4),
+        cells,
+        false,
+    );
+    let si = w.structure_index(id).unwrap();
+    w.structures[si].work_done = w.structures[si].work / 2;
+    let cam = camera_on(q, 10);
+    let pies: Vec<i64> = decode(&frame(&w, Some(0), &cam, &Overlay::default(), 0))
+        .into_iter()
+        .filter(|(code, a)| *code == op::POLY && a[0] == soft(0))
+        .map(|(_, a)| area(&a[2..]))
+        .collect();
+    assert_eq!(
+        pies.len(),
+        2,
+        "half the work: the first two cells, {pies:?}"
+    );
+    assert_eq!(pies[0], pies[1]);
 }
 
 #[test]
@@ -482,4 +557,279 @@ fn assets_carry_exact_scales_and_every_op() {
     for (name, code) in op::NAMES {
         assert_eq!(a["ops"][name], json!(code));
     }
+}
+
+/// Every point a SHAPE or FILL_SHAPE op covers, in draw-list units, widened
+/// by the visible half of its outline.
+fn shape_extent(all: &[Shape], code: i32, a: &[i32]) -> (i32, i32, i32, i32) {
+    let (id, x, y, scale) = (a[0], a[1], a[2], a[3]);
+    let half = if code == op::SHAPE {
+        a[6] * scale / SCALE_ONE / 2
+    } else {
+        0
+    };
+    let b = bounds(&all[id as usize]);
+    let at = |v: i32| v * scale / SCALE_ONE;
+    (
+        x + at(b.0) - half,
+        y + at(b.1) - half,
+        x + at(b.2) + half,
+        y + at(b.3) + half,
+    )
+}
+
+#[test]
+fn every_species_has_its_own_role_mark_and_size() {
+    for a in Species::ALL {
+        assert!(!species_parts(a).mark.is_empty(), "{a:?} has a mark");
+        for b in Species::ALL {
+            if a != b {
+                assert_ne!(species_parts(a).mark, species_parts(b).mark, "{a:?} {b:?}");
+            }
+        }
+    }
+    // Size tells workers from fighters: every Pop Cost 1 species is drawn
+    // smaller than every stronger one, and the Carpenter Ant is clearly
+    // bigger than the Harvester Ant it was mistaken for.
+    for a in Species::ALL.iter().filter(|s| s.stats().pop == 1) {
+        for b in Species::ALL.iter().filter(|s| s.stats().pop > 1) {
+            assert!(drawn_radius(*a) < drawn_radius(*b), "{a:?} {b:?}");
+        }
+    }
+    let (h, c) = (
+        drawn_radius(Species::Harvester),
+        drawn_radius(Species::Carpenter),
+    );
+    assert!(c * 100 >= h * 110, "Carpenter {c} vs Harvester {h}");
+    // Marks are drawn in ink over the body from MARK_ZOOM, never below it.
+    let mut w = world(Format::OneVOne);
+    w.ants.truncate(1);
+    let p = w.ants[0].pos;
+    let marks = |zoom: usize| {
+        decode(&frame(
+            &w,
+            None,
+            &camera_on(p, zoom),
+            &Overlay::default(),
+            0,
+        ))
+        .into_iter()
+        .filter(|(code, a)| {
+            *code == op::FILL_SHAPE
+                && a[0] >= mark_shape_id(Species::ALL[0], 0)
+                && a[0] < ANT_SHAPES
+        })
+        .map(|(_, a)| a[4])
+        .collect::<Vec<i32>>()
+    };
+    assert_eq!(marks(12), vec![C_INK], "12 pixels per cell shows the mark");
+    assert_eq!(marks(10), vec![C_INK], "8 pixels per cell shows the mark");
+    assert!(marks(5).is_empty(), "too small for a mark");
+}
+
+#[test]
+fn icons_fit_inside_their_image() {
+    let all = shapes();
+    let mut keys: Vec<String> = Species::ALL
+        .iter()
+        .map(|s| format!("species.{}", s.key()))
+        .collect();
+    keys.extend(
+        crate::rules::Upgrade::all()
+            .iter()
+            .map(|u| format!("upgrade.{}", u.key())),
+    );
+    keys.extend(
+        StructureKind::all()
+            .iter()
+            .map(|k| format!("structure.{}", k.key())),
+    );
+    for k in [
+        "action.all_ants",
+        "action.evolve",
+        "action.retreat",
+        "focus.balanced",
+        "focus.food",
+        "focus.nectar",
+        "focus.leaves",
+    ] {
+        keys.push(k.into());
+    }
+    let size = 48;
+    let full = size * SUB_PX;
+    for k in keys {
+        let list = icon_list(&k, 0, size).unwrap();
+        let mut seen = (full, full, 0, 0);
+        for (code, a) in decode(&list) {
+            let b = match code {
+                op::SHAPE | op::FILL_SHAPE => shape_extent(&all, code, &a),
+                op::POLY | op::OUTLINE => {
+                    let skip = if code == op::POLY { 2 } else { 3 };
+                    let pts: Vec<Pt> = a[skip..].chunks(2).map(|c| (c[0], c[1])).collect();
+                    bounds(&vec![pts])
+                }
+                _ => continue,
+            };
+            assert!(
+                b.0 >= 0 && b.1 >= 0 && b.2 <= full && b.3 <= full,
+                "{k} pokes out of its {size} px image: {b:?} of {full}"
+            );
+            seen = (
+                seen.0.min(b.0),
+                seen.1.min(b.1),
+                seen.2.max(b.2),
+                seen.3.max(b.3),
+            );
+        }
+        let span = (seen.2 - seen.0).max(seen.3 - seen.1);
+        assert!(
+            span >= full * 7 / 10,
+            "{k} fills its image: {span} of {full}"
+        );
+    }
+}
+
+#[test]
+fn gather_focus_icons_wear_their_resources_colours() {
+    let fills = |k: &str| -> Vec<i32> {
+        decode(&icon_list(k, 1, 48).unwrap())
+            .into_iter()
+            .filter(|(code, _)| *code == op::SHAPE)
+            .map(|(_, a)| a[4])
+            .collect()
+    };
+    assert_eq!(fills("focus.food"), vec![C_CRUMB]);
+    assert_eq!(fills("focus.nectar"), vec![C_PETAL, C_POLLEN]);
+    assert_eq!(fills("focus.leaves"), vec![C_LEAF]);
+    assert_eq!(
+        fills("focus.balanced"),
+        vec![C_CRUMB, C_PETAL, C_POLLEN, C_LEAF]
+    );
+    assert_ne!(
+        icon_list("action.evolve", 0, 48),
+        icon_list("action.retreat", 0, 48),
+        "Evolve and Retreat have different pictures"
+    );
+}
+
+#[test]
+fn a_waypoint_prints_its_species_on_the_flag() {
+    let mut w = world(Format::OneVOne);
+    let q = w.structures[queen_of(&w, 0)].pos;
+    let (qx, qy) = q.cell();
+    let (x, y) = (qx + 3, qy + 3);
+    for species in [Species::Soldier, Species::Acid, Species::Dinosaur] {
+        w.apply(
+            0,
+            &Command::SetWaypoint {
+                species: Some(species),
+                x,
+                y,
+                add: false,
+            },
+        );
+    }
+    let wp = w.colonies[0].waypoints[Species::Soldier.index()][0];
+    let cam = camera_on(q, 12);
+    let overlay = Overlay {
+        hover_waypoint: Some(wp),
+        ..Overlay::default()
+    };
+    w.ants.clear();
+    let ops = decode(&frame(&w, Some(0), &cam, &overlay, 0));
+    let cloth = ops
+        .iter()
+        .find(|(code, a)| *code == op::POLY && a[0] == player(0) && a[1] == 5)
+        .map(|(_, a)| {
+            let pts: Vec<Pt> = a[2..].chunks(2).map(|c| (c[0], c[1])).collect();
+            bounds(&vec![pts])
+        })
+        .expect("a pennant in the player colour");
+    let all = shapes();
+    let icons: Vec<_> = ops
+        .iter()
+        .filter(|(code, a)| (*code == op::SHAPE || *code == op::FILL_SHAPE) && a[0] < ANT_SHAPES)
+        .collect();
+    assert_eq!(icons.len(), 3, "one icon per species");
+    for (code, a) in icons {
+        assert_eq!(
+            a[4], C_INK,
+            "printed in ink, not an ant in the player colour"
+        );
+        let b = shape_extent(&all, *code, a);
+        assert!(
+            b.0 >= cloth.0 && b.1 >= cloth.1 && b.2 <= cloth.2 && b.3 <= cloth.3,
+            "the icon {b:?} lies on the cloth {cloth:?}"
+        );
+    }
+    assert!(
+        ops.iter()
+            .any(|(code, a)| *code == op::OUTLINE && a[0] == C_HOVER),
+        "the hovered waypoint is highlighted"
+    );
+}
+
+/// The draw list for one effect alone, `phase_ticks` after it began.
+fn effect_ops(kind: EffectKind, age: i32, interp: i32) -> Vec<(i32, Vec<i32>)> {
+    let mut w = world(Format::OneVOne);
+    w.ants.clear();
+    let q = w.structures[queen_of(&w, 0)].pos;
+    let to = Pos::new(q.x + 4 * CELL, q.y);
+    w.effects.push(crate::world::Effect {
+        kind,
+        from: Pos::new(to.x - 3 * CELL, to.y),
+        to,
+        until: w.tick + effect_life(kind) - age,
+        colony: 0,
+    });
+    decode(&frame(
+        &w,
+        None,
+        &camera_on(to, 12),
+        &Overlay::default(),
+        interp,
+    ))
+}
+
+#[test]
+fn each_hit_kind_has_its_own_look() {
+    let has = |ops: &[(i32, Vec<i32>)], code: i32, colour: i32| {
+        ops.iter().any(|(c, a)| *c == code && a[0] == colour)
+    };
+    // A Bite: jaws in the attacker's colour and a white flash on the target.
+    let bite = effect_ops(EffectKind::Bite, 0, 200);
+    assert!(has(&bite, op::LINE, player(0)) && has(&bite, op::POLY, C_BITE));
+    // A Spray: a green droplet in flight, then a splat.
+    let fly = effect_ops(EffectKind::Spray, 0, 500);
+    let splat = effect_ops(EffectKind::Spray, 1, 800);
+    assert!(has(&fly, op::POLY, C_ACID) && has(&fly, op::LINE, C_ACID));
+    assert!(has(&splat, op::POLY, C_ACID) && !has(&splat, op::LINE, C_ACID));
+    // A Blast: a ring that grows to the Splash radius.
+    let ring = |age: i32, interp: i32| -> i32 {
+        let ops = effect_ops(EffectKind::Blast, age, interp);
+        let (_, a) = ops
+            .iter()
+            .find(|(c, a)| *c == op::OUTLINE && a[0] == C_BLAST_RING)
+            .expect("a blast ring");
+        let xs: Vec<i32> = a[3..].iter().step_by(2).copied().collect();
+        (xs.iter().max().unwrap() - xs.iter().min().unwrap()) / 2
+    };
+    let cam = camera_on(Pos::new(0, 0), 12);
+    let splash = cam.length(Species::Exploding.stats().splash);
+    let (early, late) = (ring(0, 0), ring(3, 999));
+    assert!(early < splash / 2, "starts small: {early} of {splash}");
+    assert!(
+        (splash * 9 / 10..=splash).contains(&late),
+        "ends at the Splash radius: {late} of {splash}"
+    );
+    // A Heal: a green plus that rises.
+    let plus_top = |age: i32| -> i32 {
+        let ops = effect_ops(EffectKind::Heal, age, 0);
+        let (_, a) = ops
+            .iter()
+            .find(|(c, a)| *c == op::POLY && a[0] == C_HEAL)
+            .expect("a green plus");
+        a[3..].iter().step_by(2).copied().min().unwrap()
+    };
+    assert!(plus_top(2) < plus_top(0), "the plus rises");
 }

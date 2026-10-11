@@ -89,6 +89,17 @@ pub struct Bench {
     biome: Biome,
     /// Whose Fog of War to draw; `None` shows everything.
     viewer: Option<u8>,
+    /// `?gallery`: draw the species gallery instead of the scenario.
+    pub gallery: bool,
+}
+
+/// Whether the page asked for the species gallery (`?gallery`): every
+/// species side by side at the zooms players use, for review.
+pub fn wants_gallery(query: &str) -> bool {
+    query
+        .trim_start_matches('?')
+        .split('&')
+        .any(|p| p == "gallery")
 }
 
 /// Benchmark options from the page's query string: `biome=flower_field`
@@ -138,6 +149,7 @@ impl Bench {
             restarts: 0,
             biome,
             viewer,
+            gallery: wants_gallery(query),
         }
     }
 
@@ -189,7 +201,7 @@ impl Bench {
 
     /// Whether a tick should run before this frame is drawn.
     pub fn tick_due(&self) -> bool {
-        self.owed >= self.tick_us()
+        !self.gallery && self.owed >= self.tick_us()
     }
 
     /// Runs one tick. When fighting has worn the ants down, the scenario
@@ -209,6 +221,9 @@ impl Bench {
 
     /// This frame's draw list, interpolated between the last two ticks.
     pub fn draw(&self) -> Vec<i32> {
+        if self.gallery {
+            return render::species_gallery(self.camera.view_w, self.camera.view_h);
+        }
         let interp = self.owed * 1000 / self.tick_us().max(1);
         render::frame(
             &self.world,
@@ -368,6 +383,13 @@ mod tests {
             (Biome::FlowerField, Some(2))
         );
         assert_eq!(parse_options("viewer=9"), (Biome::Picnic, None));
+        assert!(wants_gallery("?biome=picnic&gallery"));
+        assert!(!wants_gallery("?biome=picnic"));
+        let mut b = Bench::new(800, 600, "?gallery");
+        b.frame_start(0);
+        b.frame_start(1_000_000);
+        assert!(!b.tick_due(), "the gallery stands still");
+        assert_eq!(b.draw(), render::species_gallery(800, 600));
     }
 
     #[test]
