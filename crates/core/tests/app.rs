@@ -889,7 +889,8 @@ fn volume_is_a_slider_in_player_settings_and_the_match_menu() {
     let ui = a.ui();
     let menu = ui["match"]["menu"]["items"].as_array().unwrap();
     assert!(
-        menu.iter().any(|i| i["type"] == "slider" && i["value"] == 45),
+        menu.iter()
+            .any(|i| i["type"] == "slider" && i["value"] == 45),
         "the in-match Menu has the Volume slider: {menu:?}"
     );
     // Settings saved with the old 4-step Volume convert to percent.

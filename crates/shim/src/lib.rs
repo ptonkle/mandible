@@ -130,6 +130,45 @@ pub fn render_assets() -> String {
     tool_core::render::assets_json()
 }
 
+/// The Menu Background's palette, as JSON text (TRIAGE row 89).
+#[wasm_bindgen]
+pub fn menu_palette() -> String {
+    tool_core::render_menu::palette_json()
+}
+
+/// The Menu Background of one screen: its ground image, painted once, and
+/// its draw list for a view size in whole pixels.
+#[wasm_bindgen]
+pub struct MenuBackground {
+    inner: tool_core::render_menu::MenuBackground,
+}
+
+#[wasm_bindgen]
+impl MenuBackground {
+    #[wasm_bindgen(constructor)]
+    pub fn new(screen: &str) -> MenuBackground {
+        MenuBackground {
+            inner: tool_core::render_menu::MenuBackground::new(screen),
+        }
+    }
+
+    pub fn width(&self) -> i32 {
+        self.inner.width()
+    }
+
+    pub fn height(&self) -> i32 {
+        self.inner.height()
+    }
+
+    pub fn image(&self) -> Vec<u8> {
+        self.inner.image()
+    }
+
+    pub fn draw(&self, view_w: f64, view_h: f64) -> Vec<i32> {
+        self.inner.draw(view_w as i32, view_h as i32)
+    }
+}
+
 /// The Benchmark: the performance-test scenario, ticked and drawn live.
 /// Browser timestamps are milliseconds as floats; they cross into the core
 /// as whole microseconds, and pixel positions as whole pixels.

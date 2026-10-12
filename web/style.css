@@ -281,3 +281,8 @@ table.cells select { width: 100%; }
 .field.slider input[type=range] { width: 100%; accent-color: var(--accent); }
 .slider-value { color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
 .overlay .field.slider { min-width: 18rem; }
+
+/* ---- menu background (TRIAGE row 89): the core's still picture, drawn on a
+   canvas behind the menus ---- */
+.menu-background { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+.menus { position: relative; background: none; }

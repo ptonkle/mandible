@@ -340,6 +340,7 @@ Used in code, docs and conversation only. **Never shown on screen**, and no term
 | Overlap | ★ | How far ants may push into each other. Kept small so fights stay readable. | stacking, clumping |
 | Tick | ◆ | One simulation step: 10 per second at Normal Game Speed. Used in code, docs and the Benchmark only. | frame (that is drawing), turn (that is the network's per-tick message) |
 | Turn | ◆ | A player's commands for one tick, sent to every peer in Online Multiplayer. | packet, input frame |
+| Menu Background | ★ | The dim, still picture behind each menu screen (TRIAGE row 89): a generated map's ground in a biome, under a dark layer, with ant silhouettes walking between chambers. Each screen has its own; it never moves. Not shown as a word on screen. | backdrop (that is the canvas clear colour in `render.rs`), wallpaper, splash |
 
 ## 14. Lobby, Player Name and Rematch (proposed 2026-10-11)
 

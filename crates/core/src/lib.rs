@@ -22,6 +22,7 @@ pub mod lockstep;
 pub mod map;
 pub mod nav;
 pub mod render;
+pub mod render_menu;
 pub mod rules;
 pub mod settings;
 pub mod sound;

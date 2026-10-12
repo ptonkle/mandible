@@ -36,17 +36,32 @@ def fits(page):
     return w - cw, h - ch
 
 
+def background_shown(page):
+    """The Menu Background (TRIAGE row 89): its canvas is shown, fills the
+    window, and has been painted (its corner and centre pixels differ)."""
+    return page.evaluate(
+        "() => { const c = document.getElementById('menu-background');"
+        " if (c.hidden || c.width !== innerWidth || c.height !== innerHeight) return false;"
+        " const g = c.getContext('2d');"
+        " const a = g.getImageData(0, 0, 1, 1).data.join();"
+        " const b = g.getImageData(c.width >> 1, c.height >> 1, 1, 1).data.join();"
+        " return a !== b; }"
+    )
+
+
 def check_menus_fit(page, check):
     page.set_viewport_size({"width": FIT_W, "height": FIT_H})
     page.wait_for_timeout(100)
     over = fits(page)
     check(over == (0, 0), f"the main menu fits {FIT_W}x{FIT_H} with no scroll bar {over}")
+    check(background_shown(page), "the main menu has its Menu Background")
     for screen in MENU_SCREENS:
         page.click("#" + screen.replace(".", "\\."))
         page.wait_for_selector("#go\\.main_menu", timeout=5000)
         page.wait_for_timeout(150)
         over = fits(page)
         check(over == (0, 0), f"{screen} fits {FIT_W}x{FIT_H} with no scroll bar {over}")
+        check(background_shown(page), f"{screen} has its Menu Background")
         page.click("#go\\.main_menu")
         page.wait_for_selector(".leaf", timeout=5000)
 
@@ -97,6 +112,8 @@ def run(page, check, engine):
     page.wait_for_selector("#resources .res.food", timeout=10000)
     food = text(page, "#resources .res.food .value")
     check(food == "300", f"a match starts with 300 Food (Normal) [{food}]")
+    hidden = page.evaluate("() => document.getElementById('menu-background').hidden")
+    check(hidden, "the Menu Background is hidden in a match")
     pop = page.locator("#resources .res .value").nth(3).inner_text()
     check(pop == "10 / 20", f"Population starts at 10 / 20 [{pop}]")
     # Army (row 48): the 2 starting Soldier Ants, Pop Cost 1 each.
