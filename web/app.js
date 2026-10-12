@@ -2,7 +2,7 @@
 // DOM from the core's view model (ui()), forwards keyboard, mouse and
 // transport events, and keeps the core's settings and Match History text in
 // browser storage.
-import init, { Game, render_assets } from "./pkg/tool_shim.js";
+import init, { Game, MenuBackground, menu_palette, render_assets } from "./pkg/tool_shim.js";
 import { createRenderer } from "./render.js";
 
 const el = (id) => document.getElementById(id);
@@ -621,6 +621,30 @@ function resize() {
   mini.width = mini.clientWidth;
   mini.height = mini.clientWidth;
   fogStamp = null;
+  if (ui && ui.screen !== "match") drawMenuBackground(true);
+}
+
+// ---- the menu background (TRIAGE row 89): still; the core paints its
+// image once per screen, and its draw list again only on resize ----
+
+let menuBackground = null;
+let menuPainter = null;
+let menuScreen = "";
+
+function drawMenuBackground(again) {
+  const canvas = el("menu-background");
+  if (!menuPainter) menuPainter = createRenderer(canvas, { ...assets, palette: JSON.parse(menu_palette()) });
+  if (menuScreen !== ui.screen) {
+    if (menuBackground) menuBackground.free();
+    menuBackground = new MenuBackground(ui.screen);
+    menuPainter.setImage(assets.images.terrain, menuBackground.width(), menuBackground.height(), menuBackground.image());
+    menuScreen = ui.screen;
+  } else if (!again) {
+    return;
+  }
+  canvas.width = canvas.clientWidth;
+  canvas.height = canvas.clientHeight;
+  menuPainter.draw(menuBackground.draw(canvas.width, canvas.height));
 }
 
 // ---- drawing: the core lays out every frame; the page replays it ----
@@ -773,6 +797,9 @@ function refresh() {
   const starting = inMatch && el("match").hidden;
   el("menus").hidden = inMatch;
   el("match").hidden = !inMatch;
+  const backgroundHidden = el("menu-background").hidden;
+  el("menu-background").hidden = inMatch;
+  if (!inMatch) drawMenuBackground(backgroundHidden);
   // Every new match gets a view the size of the window.
   if (starting) {
     overlayText = "";

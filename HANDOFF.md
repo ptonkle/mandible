@@ -84,6 +84,7 @@ Slow checks (run by hand, results in `MEASUREMENTS.md`):
 - **Latest `check.sh` and `check-online.sh`** (commit `b286aef` and the slider): BUILDER CHECK PASSED; ONLINE CHECK PASSED in three engines.
 - **Balance and species pass** (TRIAGE rows 63, 67–71, 78, 82, 83, 86; 2026-10-11): `check.sh` BUILDER CHECK PASSED (three engines). AI ladder: Imago beat Pupa 8/10 Tunnels, 10/10 Open Ground, 9/10 Maze; Pupa beat Larva 10/10 on all three.
 - **Match setup (TRIAGE rows 61, 79, 80, 81, 87; 2026-10-11):** `cargo test --workspace` passes; `./scripts/check.sh`: BUILDER CHECK PASSED (browser check in chromium, firefox, webkit); `./scripts/check-online.sh`: ONLINE CHECK PASSED and ONLINE MATCH CHECK PASSED in three engines.
+- **Menu Background (TRIAGE row 89)**: `./scripts/check.sh` on 2026-10-11: BUILDER CHECK PASSED (chromium, firefox, webkit; the Menu Background is shown on every menu and hidden in a match).
 
 ## What remains
 
