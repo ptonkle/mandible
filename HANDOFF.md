@@ -4,6 +4,43 @@ Stage 9, written by the agent. `C5 Consolidate in your own words`.
 
 A fresh session starts from this file, not from memory.
 
+## Start here next session (written 2026-10-12)
+
+**State:** everything is committed on `main` (no worktrees left) and deployed. The live site is https://ptonkle.github.io/ (home page with a random battle picture from `img/mandible/`) and the game is at https://ptonkle.github.io/mandible/. All TRIAGE rows 1–89 are done. Last results: `check.sh` and `check-online.sh` passed in three engines. The AI ladder passes on all three map types (Imago beat Pupa 9–10/10, Pupa beat Larva 10/10). Perf with 1,200 ants: 1.2 ms average tick.
+
+**Questions for the person:**
+- **Siege Ant Species Upgrade** (SECOND-ORDER row 55). The Upgrades tab is full, so adding one means rearranging it.
+- **Saved Default Match Settings** from before Map Type Random still say Tunnels (row 63). The person picks Random once, or presses Reset. A migration could do this instead.
+- **"Everyone on one team" (TRIAGE row 81).** The cause was never reproduced. Start is now refused in three places. If the person remembers the setup, check that path.
+
+**For the person to try by hand:**
+- **2v2 lag:** confirm the performance work fixed it (row 72; the next suspect is `ui()` JSON every frame).
+- **Sound loudness:** the new levels: every cue at half level, default Volume 50%.
+- **Leaves balance:** play against the AI and compare in the end graphs. Balanced is now 7:2:3, and the Imago AI still ends with about 1,200 unspent Leaves because it runs short of Food.
+- **Room Code play across real networks** (row 31). There is no TURN server (row 10).
+- **Match History for an online match** (row 50).
+
+**Known loose ends:**
+- **Ctrl+W / Ctrl+Q** can't be caught (row 25; Alt also gives Train 10).
+- **Maze hunting** is only partly fixed (row 42).
+- **"Map Revealed"** uses a never-say word (row 40).
+- **The Tunnels ladder** was at 8–9/10, close to the bar.
+- **`map_generation_time` (ai test)** can fail on Maze when other heavy jobs run at the same time. Rerun it alone.
+
+**How the work was done (keep doing this):**
+- Feedback goes into `TRIAGE.md` rows first.
+- The rows are split across parallel worktree agents with clear file ownership, then merged on main.
+- Then run `check.sh`, `check-online.sh` and the ladder for all three map types, and record the results here.
+- SECOND-ORDER rows were renumbered in merge order, so agents' notes in TRIAGE may cite their own pre-merge row numbers.
+
+**Deploy (only when the person says so; each deploy needs their go-ahead):**
+1. Run `./scripts/pages.sh`.
+2. In `~/slop/ptonkle.github.io`, scan for personal names.
+3. Commit as `ptonk <65458712+ptonkle@users.noreply.github.com>` and push.
+4. Run `BUILDER_ORIGIN=https://ptonkle.github.io/mandible .venv/bin/python tests/browser/check.py`.
+
+The battle pictures came from a throwaway scan of all-AI Imago matches, which was not kept. Seeds and settings for each picture are in TRIAGE row 66's session notes, if needed: format, seed, biome, map type and clock time, e.g. 2v2 seed 19 Flower Field Maze at 7:51.
+
 ## What changed
 
 The Builder template became a playable ant-colony RTS. Its parts:
