@@ -61,6 +61,7 @@ function field(item) {
   if (hints[item.label]) label.dataset.term = item.label;
   let input;
   if (item.type === "select") {
+    wrap.classList.add("select-field");
     input = make("select");
     item.options.forEach((o) => {
       const opt = make("option", "", o.text);
@@ -82,6 +83,38 @@ function field(item) {
   input.id = item.id;
   label.htmlFor = item.id;
   wrap.append(label, input);
+  return wrap;
+}
+
+// A Room Code and its Copy button in one bordered group: the code is an
+// input when `item.input` names one, else plain text. The core says when the
+// button reads Copied.
+function copyField(item) {
+  const wrap = make("div", "field copy-field");
+  const label = make("label", "", item.label);
+  const group = make("div", "copy-group");
+  let code;
+  if (item.input) {
+    code = make("input");
+    code.id = item.input;
+    code.value = item.value;
+    code.addEventListener("input", () => send(item.input, code.value));
+    label.htmlFor = item.input;
+  } else {
+    code = make("span", "copy-code", item.value);
+    code.id = item.id + ".code";
+  }
+  const b = make("button", "button copy" + (item.copied ? " active" : ""), item.text);
+  b.type = "button";
+  b.id = item.id;
+  b.disabled = item.disabled === true;
+  b.addEventListener("click", () => {
+    // Copy: the core gives the text; putting it on the clipboard is the page's job.
+    if (navigator.clipboard) navigator.clipboard.writeText(item.copy).catch(() => {});
+    send(item.id, "");
+  });
+  group.append(code, b);
+  wrap.append(label, group);
   return wrap;
 }
 
@@ -137,7 +170,12 @@ function element(item) {
     return b;
   }
   if (item.type === "table") return table(item);
-  if (item.type === "list") return pairs(item.rows);
+  if (item.type === "list") {
+    const list = pairs(item.rows);
+    if (item.id) list.id = item.id;
+    return list;
+  }
+  if (item.type === "copy") return copyField(item);
   if (item.type === "toggles") {
     const wrap = make("div", "field");
     const box = make("div", "toggles");

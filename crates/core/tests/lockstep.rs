@@ -667,6 +667,29 @@ fn a_started_match_refuses_a_late_joiner() {
 }
 
 #[test]
+fn the_lobby_never_starts_with_every_played_seat_on_one_team() {
+    // TRIAGE row 81, in the lobby itself: whatever the page shows.
+    let mut w = World::lobby(1, 3, 25, 0, 0);
+    let now = w.now;
+    let host = w.clients[0].lobby.as_mut().unwrap();
+    host.set_seat(1, SeatKind::Ai { difficulty: 1 }, now)
+        .unwrap();
+    host.set_team(1, 0, now).unwrap();
+    // Open seats are played (a Pupa AI fills them); Closed seats are not.
+    assert_eq!(host.team_count(), 3);
+    host.set_seat(2, SeatKind::Closed, now).unwrap();
+    host.set_seat(3, SeatKind::Closed, now).unwrap();
+    assert_eq!(host.team_count(), 1);
+    assert_eq!(
+        host.start(1, 50, now),
+        Err(tool_core::lockstep::LobbyError::OneTeam)
+    );
+    host.set_teams(&[2, 1], now).unwrap();
+    assert_eq!(host.team_count(), 2);
+    assert!(host.start(1, 50, now).is_ok());
+}
+
+#[test]
 fn lobby_host_sets_seats_teams_and_settings_and_every_joiner_sees_the_same_roster() {
     let mut w = World::lobby(3, 14, 25, 15, 200);
     w.run_until(10_000, |w| {
@@ -680,8 +703,13 @@ fn lobby_host_sets_seats_teams_and_settings_and_every_joiner_sees_the_same_roste
     let mut out = host
         .set_seat(3, SeatKind::Ai { difficulty: 2 }, now)
         .unwrap();
-    out.extend(host.set_team(3, 7, now).unwrap());
-    out.extend(host.set_team(0, 5, now).unwrap());
+    out.extend(host.set_team(3, 3, now).unwrap());
+    out.extend(host.set_team(0, 2, now).unwrap());
+    // Teams are Team 1–4 (0–3): no fifth.
+    assert_eq!(
+        host.set_team(3, 7, now),
+        Err(tool_core::lockstep::LobbyError::NoSuchTeam)
+    );
     out.extend(host.set_settings("{\"speed\":\"fast\"}", now).unwrap());
     assert_eq!(
         host.set_seat(0, SeatKind::Closed, now),
@@ -696,19 +724,19 @@ fn lobby_host_sets_seats_teams_and_settings_and_every_joiner_sees_the_same_roste
         .lobby
         .as_mut()
         .unwrap()
-        .request_team(5, now)
+        .request_team(2, now)
         .unwrap();
     w.net.send(2, out);
     w.run_for(8_000);
     let host_seats = w.clients[0].lobby.as_ref().unwrap().seats().to_vec();
     assert_eq!(host_seats[3].kind, SeatKind::Ai { difficulty: 2 });
-    assert_eq!(host_seats[3].team, 7);
-    assert_eq!(host_seats[0].team, 5);
+    assert_eq!(host_seats[3].team, 3);
+    assert_eq!(host_seats[0].team, 2);
     let joiner_seat = host_seats
         .iter()
         .position(|s| s.client_id() == Some("c2"))
         .unwrap();
-    assert_eq!(host_seats[joiner_seat].team, 5, "the joiner's team request");
+    assert_eq!(host_seats[joiner_seat].team, 2, "the joiner's team request");
     for c in &w.clients[1..] {
         let l = c.lobby.as_ref().unwrap();
         assert_eq!(l.seats(), &host_seats[..]);
@@ -1202,6 +1230,26 @@ mod through_the_app {
         m
     }
 
+    /// How many seats show Ready in their Status cell (the seat table's
+    /// fourth column), matched whole: "Ready Up" holds the same word.
+    fn ready_seats(m: &mut Mesh, i: usize) -> usize {
+        let ui = m.ui(i);
+        let mut n = 0;
+        for p in ui["panels"].as_array().unwrap() {
+            for item in p["items"].as_array().into_iter().flatten() {
+                if item["type"] == "table" {
+                    n += item["rows"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .filter(|r| r[3] == "Ready")
+                        .count();
+                }
+            }
+        }
+        n
+    }
+
     fn start_disabled(m: &mut Mesh) -> bool {
         let ui = m.ui(0);
         let row = ui["panels"].as_array().unwrap().last().unwrap().clone();
@@ -1225,10 +1273,7 @@ mod through_the_app {
             m.act(i, "lobby.ready", "");
         }
         m.run(1_000);
-        assert!(
-            m.panels(0).matches("Readied").count() == 3,
-            "the host sees who is ready"
-        );
+        assert!(ready_seats(&mut m, 0) == 3, "the host sees who is ready");
         // One takes it back, then readies again.
         m.act(2, "lobby.ready", "");
         m.run(1_000);
@@ -1364,7 +1409,7 @@ mod through_the_app {
                 "app {i} is back in the lobby"
             );
         }
-        assert!(!m.panels(0).contains("Readied"), "Ready Up is cleared");
+        assert_eq!(ready_seats(&mut m, 0), 0, "Ready Up is cleared");
         assert!(start_disabled(&mut m));
         m.act(1, "lobby.ready", "");
         m.run(1_000);
@@ -1476,5 +1521,156 @@ mod through_the_app {
         a.act("online.host", "", false, false);
         let p = a.ui()["panels"].to_string();
         assert!(p.contains("\"copy\":\"ABC123\""), "the Lobby has Copy too");
+    }
+
+    /// The Copy item (the Room Code and its button) in the panels.
+    fn copy_item(a: &mut App) -> Value {
+        let ui = a.ui();
+        for p in ui["panels"].as_array().unwrap() {
+            for item in p["items"].as_array().into_iter().flatten() {
+                if item["type"] == "copy" {
+                    return item.clone();
+                }
+            }
+        }
+        Value::Null
+    }
+
+    #[test]
+    fn copy_sits_with_the_room_code_and_reads_copied_for_a_moment() {
+        // TRIAGE row 87.
+        let mut a = app("me");
+        a.act("go.online", "", false, false);
+        let c = copy_item(&mut a);
+        assert_eq!(c["label"], "Room Code");
+        assert_eq!(c["input"], "online.room", "the code field is in the group");
+        assert_eq!(c["disabled"], true, "nothing to copy yet");
+        a.act("online.room", "abc123", false, false);
+        a.advance(10_000);
+        a.act("online.copy", "", false, false);
+        let c = copy_item(&mut a);
+        assert_eq!(c["text"], "Copied", "{c}");
+        assert_eq!(c["value"], "ABC123");
+        a.advance(10_000 + tool_core::app::COPIED_MS);
+        assert_eq!(copy_item(&mut a)["text"], "Copy");
+        // In the Lobby, the code is shown as text beside Copy.
+        a.act("online.host", "", false, false);
+        let c = copy_item(&mut a);
+        assert_eq!(c["value"], "ABC123");
+        assert!(c["input"].is_null(), "{c}");
+    }
+
+    /// The seat table's Team cells: the select's value (0-based) or the
+    /// text "Team N" as 0-based.
+    fn lobby_teams(m: &mut Mesh, i: usize) -> Vec<u8> {
+        let ui = m.ui(i);
+        for p in ui["panels"].as_array().unwrap() {
+            for item in p["items"].as_array().into_iter().flatten() {
+                if item["type"] == "table" {
+                    return item["rows"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .map(|r| match r[2].as_str() {
+                            Some(t) => t.trim_start_matches("Team ").parse::<u8>().unwrap() - 1,
+                            None => r[2]["value"].as_str().unwrap().parse().unwrap(),
+                        })
+                        .collect();
+                }
+            }
+        }
+        Vec::new()
+    }
+
+    #[test]
+    fn lobby_teams_default_by_format_and_each_player_picks_freely() {
+        // TRIAGE row 80.
+        let mut m = Mesh::new(2);
+        for i in 0..2 {
+            m.act(i, "go.online", "");
+        }
+        m.act(0, "online.host", "");
+        assert_eq!(lobby_teams(&mut m, 0), [0, 1], "1v1: Team 1 and Team 2");
+        m.act(0, "lobby.format", "two_v_two");
+        assert_eq!(lobby_teams(&mut m, 0), [0, 0, 1, 1], "2v2: 1, 1, 2, 2");
+        m.act(0, "lobby.format", "free_for_all");
+        assert_eq!(lobby_teams(&mut m, 0), [0, 1, 2, 3], "Free-for-all: 1-4");
+        m.link(0);
+        m.act(1, "online.join", "");
+        m.link(1);
+        m.run(1_000);
+        // The host sets an AI seat's team; the joiner picks its own.
+        m.act(0, "seat.2", "ai.2");
+        m.act(0, "lobby.team.2", "3");
+        m.act(1, "lobby.team.1", "3");
+        m.run(1_000);
+        assert_eq!(lobby_teams(&mut m, 0), [0, 3, 3, 3]);
+        assert_eq!(lobby_teams(&mut m, 1), [0, 3, 3, 3], "the joiner sees it");
+        // A joiner cannot set another seat's team.
+        m.act(1, "lobby.team.0", "3");
+        m.run(1_000);
+        assert_eq!(lobby_teams(&mut m, 0), [0, 3, 3, 3]);
+        m.act(1, "lobby.ready", "");
+        m.run(1_000);
+        m.act(0, "lobby.start", "");
+        m.run(2_000);
+        for i in 0..2 {
+            assert_eq!(m.apps[i].screen, Screen::Match, "app {i}");
+            let teams: Vec<u8> = m.apps[i]
+                .game
+                .as_ref()
+                .unwrap()
+                .world
+                .colonies
+                .iter()
+                .map(|c| c.team)
+                .collect();
+            assert_eq!(teams, [0, 3, 3, 3], "app {i} plays the Lobby's teams");
+        }
+    }
+
+    #[test]
+    fn the_lobby_refuses_start_while_every_colony_is_on_one_team() {
+        // TRIAGE row 81: Start is refused, with "Teams: 1", until the seats
+        // that are played make two teams.
+        let mut m = Mesh::new(2);
+        for i in 0..2 {
+            m.act(i, "go.online", "");
+        }
+        m.act(0, "online.host", "");
+        m.link(0);
+        m.act(1, "online.join", "");
+        m.link(1);
+        m.run(1_000);
+        m.act(1, "lobby.ready", "");
+        m.run(1_000);
+        assert!(!start_disabled(&mut m));
+        // The joiner asks for Team 1: both colonies on one team.
+        m.act(1, "lobby.team.1", "0");
+        m.run(1_000);
+        assert_eq!(lobby_teams(&mut m, 0), [0, 0]);
+        // The team change cleared Ready Up; ready again.
+        m.act(1, "lobby.ready", "");
+        m.run(1_000);
+        assert!(start_disabled(&mut m), "one team: Start is refused");
+        let p = m.panels(0);
+        assert!(p.contains("[\"Teams\",\"1\"]"), "{p}");
+        m.act(0, "lobby.start", "");
+        m.run(1_000);
+        assert_eq!(m.apps[0].screen, Screen::Lobby, "no match starts");
+        // Free-for-all with the other seats Closed: still one team.
+        m.act(0, "lobby.format", "free_for_all");
+        m.act(0, "lobby.team.1", "0");
+        m.act(0, "seat.2", "closed");
+        m.act(0, "seat.3", "closed");
+        m.act(1, "lobby.ready", "");
+        m.run(1_000);
+        assert!(start_disabled(&mut m), "Closed seats are not played");
+        // An Open seat on another team is filled by a Pupa AI: two teams.
+        m.act(0, "seat.3", "open");
+        m.act(1, "lobby.ready", "");
+        m.run(1_000);
+        assert!(!start_disabled(&mut m));
+        assert!(!m.panels(0).contains("[\"Teams\",\"1\"]"));
     }
 }

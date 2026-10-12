@@ -78,6 +78,7 @@ Slow checks (run by hand, results in `MEASUREMENTS.md`):
 - **Performance:** 2.9 ms average tick with 1,200 ants (latest, commit `3dd622e`).
 - **AI ladder (latest):** Imago beat Pupa 9/10 on Tunnels, 10/10 on Open Ground and Maze; Pupa beat Larva 10/10 on every map type. Typical match: Tunnels 5:10, Open Ground 5:19, Maze 6:02.
 - **Latest `check.sh` and `check-online.sh`** (commit `b286aef` and the slider): BUILDER CHECK PASSED; ONLINE CHECK PASSED in three engines.
+- **Match setup (TRIAGE rows 61, 79, 80, 81, 87; 2026-10-11):** `cargo test --workspace` passes; `./scripts/check.sh`: BUILDER CHECK PASSED (browser check in chromium, firefox, webkit); `./scripts/check-online.sh`: ONLINE CHECK PASSED and ONLINE MATCH CHECK PASSED in three engines.
 
 ## What remains
 

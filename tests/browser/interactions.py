@@ -36,6 +36,34 @@ def fits(page):
     return w - cw, h - ch
 
 
+# TRIAGE row 79: every select in the menus shows its longest option whole
+# ("Open Ground" was cut off). The longest option's text width must fit
+# inside the select, less its padding and 16 px for the arrow. Returns the
+# selects that cut an option off: [id, option, text width, room].
+SELECTS_CUT = """() => {
+  const out = [];
+  const probe = document.createElement('span');
+  probe.style.position = 'absolute'; probe.style.visibility = 'hidden'; probe.style.whiteSpace = 'pre';
+  document.body.append(probe);
+  document.querySelectorAll('#panels select').forEach((s) => {
+    const cs = getComputedStyle(s);
+    probe.style.font = cs.font;
+    let widest = 0, text = '';
+    for (const o of s.options) {
+      probe.textContent = o.text;
+      if (probe.offsetWidth > widest) { widest = probe.offsetWidth; text = o.text; }
+    }
+    const room = s.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) - 16;
+    if (widest > room) out.push([s.id, text, widest, room]);
+  });
+  probe.remove();
+  return out;
+}"""
+
+# Narrower windows checked for whole options (the layout may scroll there).
+NARROW_WIDTHS = [1024, 800]
+
+
 def check_menus_fit(page, check):
     page.set_viewport_size({"width": FIT_W, "height": FIT_H})
     page.wait_for_timeout(100)
@@ -47,6 +75,19 @@ def check_menus_fit(page, check):
         page.wait_for_timeout(150)
         over = fits(page)
         check(over == (0, 0), f"{screen} fits {FIT_W}x{FIT_H} with no scroll bar {over}")
+        if screen == "go.play_vs_ai":
+            # Four seats, each with a Team select.
+            page.select_option("#pva\\.format", "free_for_all")
+            page.wait_for_timeout(150)
+            over = fits(page)
+            check(over == (0, 0), f"Play vs AI with four seats fits {FIT_W}x{FIT_H} {over}")
+        for width in [FIT_W] + NARROW_WIDTHS:
+            page.set_viewport_size({"width": width, "height": FIT_H})
+            page.wait_for_timeout(100)
+            cut = page.evaluate(SELECTS_CUT)
+            check(cut == [], f"{screen} at {width}x{FIT_H}: every select shows its longest option {cut}")
+        page.set_viewport_size({"width": FIT_W, "height": FIT_H})
+        page.wait_for_timeout(100)
         page.click("#go\\.main_menu")
         page.wait_for_selector(".leaf", timeout=5000)
 
@@ -74,7 +115,7 @@ def run(page, check, engine):
     # upper-cased, and then Copy appears beside the Room Code.
     page.click("#go\\.online")
     page.wait_for_selector("#online\\.room", timeout=5000)
-    buttons = [t.strip() for t in page.locator("#panels .button").all_inner_texts()]
+    buttons = [t.strip() for t in page.locator("#panels .panel.row .button").all_inner_texts()]
     want = [STRINGS["online.host"], STRINGS["online.join"], STRINGS["menu.back"]]
     check(buttons == want, f"the Online Multiplayer screen offers Host, Join, Back {buttons}")
     fields = page.locator("#panels input, #panels textarea").count()
@@ -86,6 +127,22 @@ def run(page, check, engine):
     check(room == "K7MXP4", f"a typed Room Code is upper-cased [{room}]")
     copy = page.locator("#online\\.copy").count()
     check(copy == 1, f"Copy appears beside a Room Code [{copy}]")
+    # TRIAGE row 87: Copy sits in one group with the code it copies, and
+    # reads Copied for a moment after a press.
+    grouped = page.locator(".copy-group:has(#online\\.room):has(#online\\.copy)").count()
+    check(grouped == 1, f"the Room Code and Copy share one group [{grouped}]")
+    page.click("#online\\.copy")
+    page.wait_for_timeout(200)
+    pressed = page.inner_text("#online\\.copy").strip()
+    check(pressed == STRINGS["online.copied"], f"Copy reads Copied after a press [{pressed}]")
+    try:
+        page.wait_for_function(
+            "t => document.getElementById('online.copy').textContent.trim() === t",
+            arg=STRINGS["online.copy"], timeout=5000,
+        )
+        check(True, "Copy reads Copy again a moment later")
+    except Exception:
+        check(False, "Copy reads Copy again a moment later")
     page.click("#go\\.main_menu")
     page.wait_for_selector("#go\\.play_vs_ai", timeout=5000)
 
@@ -93,6 +150,19 @@ def run(page, check, engine):
     page.click("#go\\.play_vs_ai")
     page.wait_for_selector("#pva\\.start", timeout=5000)
     check(True, "Play vs AI opens after the leaf is dragged away")
+
+    # Teams (TRIAGE rows 80, 81): 1v1 defaults to Team 1 and Team 2; with
+    # both on Team 1, Start is refused and "Teams: 1" shows.
+    teams = [page.input_value("#pva\\.team\\.0"), page.input_value("#pva\\.team\\.1")]
+    check(teams == ["0", "1"], f"1v1 seats default to Team 1 and Team 2 {teams}")
+    page.select_option("#pva\\.team\\.1", "0")
+    page.wait_for_timeout(200)
+    notice = page.locator("#teams\\.notice").count()
+    check(notice == 1 and page.is_disabled("#pva\\.start"), f"one team: Start is refused, with Teams: 1 [{notice}]")
+    page.select_option("#pva\\.team\\.1", "1")
+    page.wait_for_timeout(200)
+    notice = page.locator("#teams\\.notice").count()
+    check(notice == 0 and not page.is_disabled("#pva\\.start"), f"two teams: Start is back [{notice}]")
     page.click("#pva\\.start")
     page.wait_for_selector("#resources .res.food", timeout=10000)
     food = text(page, "#resources .res.food .value")

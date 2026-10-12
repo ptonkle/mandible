@@ -88,6 +88,10 @@ pub enum LobbyError {
     NotOpen,
     /// A joined human has not pressed Ready Up.
     NotReady,
+    /// No team 0–3 (Team 1–4).
+    NoSuchTeam,
+    /// The seats that are played make fewer than two teams (TRIAGE row 81).
+    OneTeam,
 }
 
 /// Everything a [`super::Match`] needs, produced when the match starts.
@@ -452,7 +456,8 @@ impl Lobby {
         Ok(self.roster_changed(now_ms))
     }
 
-    /// Host: sets any seat's team, its own included.
+    /// Host: sets any seat's team (0–3), its own included. Every Ready Up
+    /// mark is cleared: the match has changed.
     pub fn set_team(
         &mut self,
         index: usize,
@@ -465,9 +470,52 @@ impl Lobby {
         if !self.open() {
             return Err(LobbyError::NotOpen);
         }
+        if team as usize >= MAX_SEATS {
+            return Err(LobbyError::NoSuchTeam);
+        }
         let seat = self.seats.get_mut(index).ok_or(LobbyError::NoSuchSeat)?;
         seat.team = team;
+        self.clear_ready();
         Ok(self.roster_changed(now_ms))
+    }
+
+    /// Host: sets every seat's team at once (seat order; seats past the
+    /// list keep theirs), for example the format's defaults after a format
+    /// change. Every Ready Up mark is cleared.
+    pub fn set_teams(&mut self, teams: &[u8], now_ms: i64) -> Result<Vec<Outgoing>, LobbyError> {
+        if !self.is_host() {
+            return Err(LobbyError::NotHost);
+        }
+        if !self.open() {
+            return Err(LobbyError::NotOpen);
+        }
+        if teams.iter().any(|t| *t as usize >= MAX_SEATS) {
+            return Err(LobbyError::NoSuchTeam);
+        }
+        for (seat, team) in self.seats.iter_mut().zip(teams) {
+            seat.team = *team;
+        }
+        self.clear_ready();
+        Ok(self.roster_changed(now_ms))
+    }
+
+    /// How many teams the seats that are played (every seat but Closed)
+    /// make. Start needs at least two.
+    pub fn team_count(&self) -> usize {
+        crate::settings::team_count(
+            self.seats
+                .iter()
+                .filter(|s| s.kind != SeatKind::Closed)
+                .map(|s| s.team),
+        )
+    }
+
+    fn clear_ready(&mut self) {
+        for seat in &mut self.seats {
+            if let SeatKind::Human { ready, .. } = &mut seat.kind {
+                *ready = false;
+            }
+        }
     }
 
     /// Host: replaces the opaque match settings.
@@ -484,11 +532,7 @@ impl Lobby {
         }
         self.settings = settings.to_string();
         // New settings: every joiner looks again before Ready Up.
-        for seat in &mut self.seats {
-            if let SeatKind::Human { ready, .. } = &mut seat.kind {
-                *ready = false;
-            }
-        }
+        self.clear_ready();
         Ok(self.roster_changed(now_ms))
     }
 
@@ -578,6 +622,9 @@ impl Lobby {
         }
         if !self.all_ready() {
             return Err(LobbyError::NotReady);
+        }
+        if self.team_count() < 2 {
+            return Err(LobbyError::OneTeam);
         }
         let msg = Msg::Start {
             seed,
@@ -768,8 +815,9 @@ impl Lobby {
                     return Vec::new();
                 }
                 match self.seat_of_peer(peer) {
-                    Some(i) if self.seats[i].team != team => {
+                    Some(i) if self.seats[i].team != team && (team as usize) < MAX_SEATS => {
                         self.seats[i].team = team;
+                        self.clear_ready();
                         self.roster_changed(now_ms)
                     }
                     _ => Vec::new(),

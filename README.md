@@ -18,7 +18,9 @@ Every game word is defined in [`GLOSSARY.md`](GLOSSARY.md). The design is in [`B
 | Tech | **Evolve** to Tier 2 and Tier 3 (Colony tab) to unlock species and upgrade ranks. |
 | Sandbox | **Sandbox** (Match Settings): unlimited resources and Tier 3 for human colonies, plus Pause and Time Scale. |
 | Scout | **Auto-Scout** (Colony tab): one combat ant explores by itself. **Map Revealed** (Match Settings) starts every colony with the map Explored. |
-| Online | **Host** with the Room Code empty fills in a random code (6 characters, no 1, 0, I or O) to share; **Join** with the code. Codes are not case-sensitive. |
+| Online | **Host** with the Room Code empty fills in a random code (6 characters, no 1, 0, I or O) to share with **Copy** beside it; **Join** with the code. Codes are not case-sensitive. A joined player presses **Ready Up** (Status: Ready); the host's Start waits for every one. |
+| Teams | Each seat picks **Team 1–4** freely (Play vs AI: every seat; Lobby: the host any seat, a player their own). The format sets the defaults (1v1: 1, 2; 2v2: 1, 1, 2, 2; Free-for-all: 1–4) and choosing a format brings them back. Start is refused while the played seats make one team ("Teams: 1"). |
+| Map | **Map Type** Random (the default) picks Tunnels, Open Ground or Maze from the seed; **Biome** Random likewise. |
 | Events | A **Windfall** (a cache of resources) or a **Hill** (hold it longest to win a bundle) appears every 60–90 s from 1:30. |
 
 ### Controls

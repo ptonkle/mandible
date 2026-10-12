@@ -7,7 +7,7 @@
 //! `data/glossary.json`, and all of it follows GLOSSARY.md: labels and
 //! label-value pairs, not prose.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use serde_json::{json, Value};
 
@@ -23,8 +23,8 @@ use crate::rules::{
     evolve_cost, Resource, Role, Species, StructureKind, Upgrade, TICKS_PER_SECOND,
 };
 use crate::settings::{
-    can_disable, Biome, Difficulty, Format, GameSpeed, Level, MapType, MatchSettings, SeatKind,
-    TUNNEL_MAX, TUNNEL_MIN,
+    can_disable, team_count, Biome, Difficulty, Format, GameSpeed, Level, MapType, MatchSettings,
+    SeatKind, TEAM_COUNT, TUNNEL_MAX, TUNNEL_MIN,
 };
 use crate::sound::Cue;
 use crate::world::{
@@ -293,6 +293,8 @@ pub struct Online {
     /// The page's transport has a session open (Host or Join pressed, not
     /// yet left): leaving must close it.
     pub session: bool,
+    /// When Copy was last pressed, for its Copied state.
+    pub copied_ms: Option<i64>,
 }
 
 pub struct App {
@@ -376,6 +378,7 @@ impl App {
                 codes: false,
                 early_peers: Vec::new(),
                 session: false,
+                copied_ms: None,
             },
             client_id: client_id.to_string(),
             now_ms: 0,
@@ -638,7 +641,7 @@ impl App {
             self.select(
                 &format!("{prefix}.map_type"),
                 "setting.map_type",
-                ["tunnels", "open", "maze"]
+                ["tunnels", "open", "maze", "random"]
                     .iter()
                     .map(|v| (v.to_string(), self.t(&format!("map_type.{v}"))))
                     .collect(),
@@ -688,13 +691,10 @@ impl App {
                 json!({"kind": "row", "items": [self.button("go.main_menu", "menu.back"), self.button("def.reset", "menu.reset")]}),
             ],
             Screen::PlayVsAi => {
-                let mut seats = Vec::new();
+                // One row per seat: player color, You or an AI and its
+                // Difficulty, and a team chosen freely (TRIAGE row 80).
+                let mut rows = Vec::new();
                 for i in 0..self.setup.format.seats() {
-                    let team = format!(
-                        "{} {}",
-                        self.t("seat.team"),
-                        self.setup.format.team_of(i) + 1
-                    );
                     let d = if i == 0 {
                         self.first_seat
                     } else {
@@ -704,38 +704,45 @@ impl App {
                     if i == 0 {
                         // Seat 1 may be You or an AI; with no You, the match
                         // is spectated.
-                        options.push((
-                            "you".to_string(),
-                            format!("{} · {}", self.t("seat.you"), team),
-                        ));
+                        options.push(("you".to_string(), self.t("seat.you")));
                     }
                     for v in ["larva", "pupa", "imago"] {
                         options.push((
                             v.to_string(),
                             format!(
-                                "{} {} · {}",
+                                "{} {}",
                                 self.t("seat.ai"),
-                                self.t(&format!("difficulty.{v}")),
-                                team
+                                self.t(&format!("difficulty.{v}"))
                             ),
                         ));
                     }
                     let value = d.map(difficulty_key).unwrap_or("you");
-                    let mut sel =
-                        self.select(&format!("ai.{i}"), &format!("color.{i}"), options, value);
-                    if let Some(d) = d {
-                        sel["term"] = json!(self.t(&format!("difficulty.{}", difficulty_key(d))));
-                    }
-                    seats.push(sel);
+                    let mut sel = self.select(&format!("ai.{i}"), "seat.player", options, value);
+                    sel["bare"] = json!(true);
+                    rows.push(json!([
+                        self.t(&format!("color.{i}")),
+                        sel,
+                        self.team_select(&format!("pva.team.{i}"), self.setup.team_of(i)),
+                    ]));
+                }
+                let mut seats = vec![json!({
+                    "type": "table",
+                    "head": [self.t("seat.label"), self.t("seat.player"), self.t("seat.team")],
+                    "rows": rows,
+                })];
+                if let Some(notice) = self.teams_notice(self.setup.seat_teams()) {
+                    seats.push(notice);
                 }
                 if self.first_seat.is_some() {
                     seats.push(json!({"type": "list", "rows": [[self.t("stat.status"), self.t("hud.spectate")]]}));
                 }
                 seats.push(json!({"type": "input", "id": "pva.seed", "label": self.t("setting.seed"), "value": self.seed_text, "placeholder": self.t("random")}));
+                let mut start = self.button("pva.start", "menu.start");
+                start["disabled"] = json!(team_count(self.setup.seat_teams()) < 2);
                 vec![
                     json!({"kind": "form", "single": true, "heading": self.t("menu.play_vs_ai"), "items": seats}),
                     json!({"kind": "form", "heading": self.t("menu.match_settings"), "items": self.settings_fields(&self.setup, "pva", true)}),
-                    json!({"kind": "row", "items": [self.button("go.main_menu", "menu.back"), self.button("pva.start", "menu.start")]}),
+                    json!({"kind": "row", "items": [self.button("go.main_menu", "menu.back"), start]}),
                 ]
             }
             Screen::PlayerSettings => {
@@ -821,11 +828,8 @@ impl App {
     fn online_panels(&self) -> Vec<Value> {
         let mut items = vec![
             json!({"type": "input", "id": "online.name", "label": self.t("online.name"), "value": self.player.name, "placeholder": self.t("seat.player")}),
-            json!({"type": "input", "id": "online.room", "label": self.t("online.room_code"), "value": self.online.room}),
+            self.room_code_copy(Some("online.room")),
         ];
-        if !self.online.room.is_empty() {
-            items.push(self.copy_button(&self.online.room));
-        }
         items.push(json!({"type": "list", "rows": [[self.t("online.status"), self.net_status()]]}));
         let mut panels = vec![
             json!({"kind": "form", "single": true, "heading": self.t("menu.online"), "items": items}),
@@ -850,9 +854,56 @@ impl App {
         panels
     }
 
-    /// The Copy button: the page puts `text` on the clipboard.
-    fn copy_button(&self, text: &str) -> Value {
-        json!({"type": "button", "id": "online.copy", "text": self.t("online.copy"), "copy": text})
+    /// The Room Code with its Copy button beside it, in one group (TRIAGE
+    /// row 87): an input on the Online Multiplayer screen (`input` is its
+    /// id), plain text in the Lobby. The page puts the code on the
+    /// clipboard; for a moment after a press the button reads Copied.
+    fn room_code_copy(&self, input: Option<&str>) -> Value {
+        let copied = self
+            .online
+            .copied_ms
+            .is_some_and(|t| self.now_ms - t < COPIED_MS);
+        let mut v = json!({
+            "type": "copy",
+            "id": "online.copy",
+            "label": self.t("online.room_code"),
+            "value": self.online.room,
+            "copy": self.online.room,
+            "text": self.t(if copied { "online.copied" } else { "online.copy" }),
+            "copied": copied,
+            "disabled": self.online.room.is_empty(),
+        });
+        if let Some(id) = input {
+            v["input"] = json!(id);
+        }
+        v
+    }
+
+    /// A bare Team 1–4 select for a table cell.
+    fn team_select(&self, id: &str, team: u8) -> Value {
+        let options = (0..TEAM_COUNT)
+            .map(|t| {
+                (
+                    t.to_string(),
+                    format!("{} {}", self.t("seat.team"), t as i32 + 1),
+                )
+            })
+            .collect();
+        let mut sel = self.select(id, "seat.team", options, &team.to_string());
+        sel["bare"] = json!(true);
+        sel
+    }
+
+    /// Below the seats while Start is refused because the played seats make
+    /// fewer than two teams (TRIAGE row 81): "Teams: 1 · Requires: 2 Teams".
+    fn teams_notice(&self, played: Vec<u8>) -> Option<Value> {
+        let n = team_count(played);
+        (n < 2).then(|| {
+            json!({"type": "list", "id": "teams.notice", "rows": [
+                [self.t("setting.teams"), n.to_string()],
+                [self.t("stat.requires"), format!("2 {}", self.t("setting.teams"))],
+            ]})
+        })
     }
 
     /// Status on the Online Multiplayer screen and in the Lobby: the lobby's
@@ -939,27 +990,33 @@ impl App {
             } else {
                 String::new()
             };
-            rows.push(json!([
-                self.t(&format!("color.{i}")),
-                player,
-                format!("{} {}", self.t("seat.team"), settings.format.team_of(i) + 1),
-                status,
-            ]));
+            // The host sets every seat's team; a joiner its own.
+            let team = if host || l.status() == &LobbyStatus::Seated(i as u8) {
+                self.team_select(&format!("lobby.team.{i}"), seat.team)
+            } else {
+                json!(format!("{} {}", self.t("seat.team"), seat.team as i32 + 1))
+            };
+            rows.push(json!([self.t(&format!("color.{i}")), player, team, status]));
         }
         let mut seats = vec![json!({
             "type": "table",
             "head": [self.t("seat.label"), self.t("seat.player"), self.t("seat.team"), self.t("online.status")],
             "rows": rows,
         })];
-        let mut pairs = Vec::new();
-        if !self.online.room.is_empty() {
-            pairs.push(json!([self.t("online.room_code"), self.online.room]));
+        let played = l
+            .seats()
+            .iter()
+            .filter(|s| s.kind != NetSeat::Closed)
+            .map(|s| s.team)
+            .collect();
+        if let Some(notice) = self.teams_notice(played) {
+            seats.push(notice);
         }
-        pairs.push(json!([self.t("online.status"), self.net_status()]));
-        seats.push(json!({"type": "list", "rows": pairs}));
         if !self.online.room.is_empty() {
-            seats.push(self.copy_button(&self.online.room));
+            // The Room Code and its Copy button, together (TRIAGE row 87).
+            seats.push(self.room_code_copy(None));
         }
+        seats.push(json!({"type": "list", "rows": [[self.t("online.status"), self.net_status()]]}));
         let mut row = vec![self.button("lobby.leave", "online.leave")];
         if host {
             let mut start = self.button("lobby.start", "menu.start");
@@ -1938,6 +1995,7 @@ impl App {
             }
             "go.play_vs_ai" => {
                 self.setup = self.defaults.clone();
+                self.setup.teams.clear();
                 self.screen = Screen::PlayVsAi;
             }
             "go.online" => self.screen = Screen::Online,
@@ -2025,8 +2083,13 @@ impl App {
                     .collect();
                 self.save_settings();
             }
-            // The page copies the Room Code; nothing changes here.
-            "online.copy" => {}
+            // The page copies the Room Code; the button reads Copied for a
+            // moment.
+            "online.copy" => {
+                if !self.online.room.is_empty() {
+                    self.online.copied_ms = Some(self.now_ms);
+                }
+            }
             "menu.resume" => {
                 if let Some(g) = &mut self.game {
                     g.menu_open = false;
@@ -2128,6 +2191,12 @@ impl App {
                 self.defaults = m;
                 self.save_settings();
             }
+        } else if let Some(rest) = id.strip_prefix("pva.team.") {
+            if let (Ok(i), Ok(t)) = (rest.parse::<usize>(), value.parse::<u8>()) {
+                self.setup.set_team(i, t);
+            }
+        } else if let Some(rest) = id.strip_prefix("lobby.team.") {
+            self.lobby_team(rest, value);
         } else if let Some(rest) = id.strip_prefix("pva.") {
             let mut m = self.setup.clone();
             if apply_setting(&mut m, rest, value) {
@@ -2172,8 +2241,13 @@ impl App {
 
     /// Play vs AI with the current settings and seats on this seed.
     fn start_local_seeded(&mut self, seed: u64) {
+        // Every colony on one team is no match (TRIAGE row 81).
+        if team_count(self.setup.seat_teams()) < 2 {
+            return;
+        }
         let mut settings = self.setup.clone();
         settings.biome = settings.biome.resolve(seed);
+        settings.map_type = settings.map_type.resolve(seed);
         let mut seats = vec![match self.first_seat {
             Some(d) => SeatKind::Ai(d),
             None => SeatKind::Human,
@@ -2760,7 +2834,7 @@ impl App {
     fn host_online(&mut self, request: Value) {
         self.leave_online();
         let settings = serde_json::to_string(&self.defaults).expect("serialises");
-        let lobby = Lobby::host(
+        let mut lobby = Lobby::host(
             App::version(),
             &self.client_id,
             &self.player_name(),
@@ -2768,6 +2842,10 @@ impl App {
             &settings,
             self.now_ms,
         );
+        // Teams start as the format's defaults (TRIAGE row 80).
+        if let Ok(out) = lobby.set_teams(&self.defaults.seat_teams(), self.now_ms) {
+            self.online.outbox.extend(out);
+        }
         self.online.lobby = Some(lobby);
         self.online.session = true;
         self.online.requests.push(request);
@@ -2844,6 +2922,7 @@ impl App {
             return;
         };
         let mut m = MatchSettings::parse(l.settings()).unwrap_or_default();
+        let format = m.format;
         if !apply_setting(&mut m, rest, value) {
             return;
         }
@@ -2854,6 +2933,35 @@ impl App {
             Err(_) => return,
         }
         if let Ok(out) = l.set_settings(&serde_json::to_string(&m).expect("serialises"), now) {
+            self.online.outbox.extend(out);
+        }
+        // A new format brings back its default teams (TRIAGE row 80).
+        if m.format != format {
+            if let Ok(out) = l.set_teams(&m.seat_teams(), now) {
+                self.online.outbox.extend(out);
+            }
+        }
+    }
+
+    /// A seat's Team select in the Lobby: the host sets any seat's team; a
+    /// joiner asks for its own.
+    fn lobby_team(&mut self, rest: &str, value: &str) {
+        let now = self.now_ms;
+        let (Ok(i), Ok(team), Some(l)) = (
+            rest.parse::<usize>(),
+            value.parse::<u8>(),
+            &mut self.online.lobby,
+        ) else {
+            return;
+        };
+        let out = if l.is_host() {
+            l.set_team(i, team, now)
+        } else if l.status() == &LobbyStatus::Seated(i as u8) {
+            l.request_team(team, now)
+        } else {
+            return;
+        };
+        if let Ok(out) = out {
             self.online.outbox.extend(out);
         }
     }
@@ -2875,15 +2983,7 @@ impl App {
         let Some(l) = &self.online.lobby else {
             return false;
         };
-        let m = MatchSettings::parse(l.settings()).unwrap_or_default();
-        let teams: BTreeSet<u8> = l
-            .seats()
-            .iter()
-            .enumerate()
-            .filter(|(_, s)| s.kind != NetSeat::Closed)
-            .map(|(i, _)| m.format.team_of(i))
-            .collect();
-        l.is_host() && l.all_ready() && teams.len() >= 2
+        l.is_host() && l.all_ready() && l.team_count() >= 2
     }
 
     fn start_online(&mut self) {
@@ -2926,7 +3026,10 @@ impl App {
         let (m, out) = Match::new(start.clone(), self.now_ms);
         self.online.outbox.extend(out);
         let mut settings = settings;
+        // Each seat's team, as the Lobby set it (TRIAGE row 80).
+        settings.teams = start.seats.iter().map(|s| s.team).collect();
         settings.biome = settings.biome.resolve(start.seed);
+        settings.map_type = settings.map_type.resolve(start.seed);
         let mut world = World::new(start.seed, settings, &seats);
         // A Closed seat is not played: its colony is out from the first
         // tick, alike on every client.
@@ -3202,6 +3305,9 @@ fn clock(ticks: i32) -> String {
     )
 }
 
+/// How long Copy reads Copied after a press, in milliseconds.
+pub const COPIED_MS: i64 = 1500;
+
 /// The Volume slider moves in steps of this many percent.
 pub const VOLUME_STEP: u8 = 5;
 
@@ -3226,6 +3332,7 @@ fn map_type_key(t: MapType) -> &'static str {
         MapType::Tunnels => "tunnels",
         MapType::Open => "open",
         MapType::Maze => "maze",
+        MapType::Random => "random",
     }
 }
 
@@ -3281,12 +3388,16 @@ fn parse_level(v: &str) -> Option<Level> {
 /// Applies one settings field; false if the value is not allowed.
 pub fn apply_setting(m: &mut MatchSettings, field: &str, value: &str) -> bool {
     match field {
-        "format" => match value {
-            "one_v_one" => m.format = Format::OneVOne,
-            "two_v_two" => m.format = Format::TwoVTwo,
-            "free_for_all" => m.format = Format::FreeForAll,
-            _ => return false,
-        },
+        "format" => {
+            m.format = match value {
+                "one_v_one" => Format::OneVOne,
+                "two_v_two" => Format::TwoVTwo,
+                "free_for_all" => Format::FreeForAll,
+                _ => return false,
+            };
+            // A new format brings back its default teams (TRIAGE row 80).
+            m.teams.clear();
+        }
         "map_size" => match parse_level(value) {
             Some(l) => m.map_size = l,
             None => return false,
@@ -3325,6 +3436,7 @@ pub fn apply_setting(m: &mut MatchSettings, field: &str, value: &str) -> bool {
             "tunnels" => m.map_type = MapType::Tunnels,
             "open" => m.map_type = MapType::Open,
             "maze" => m.map_type = MapType::Maze,
+            "random" => m.map_type = MapType::Random,
             _ => return false,
         },
         "events" => m.events = value == "on",
