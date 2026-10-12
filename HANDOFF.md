@@ -54,6 +54,7 @@ The details are in `SECOND-ORDER.md` rows 37–40.
 - **Privacy:** the published files hold no personal names. `build.sh` maps the home folder to `~` in paths embedded in the wasm.
 - **Check:** `BUILDER_ORIGIN=https://ptonkle.github.io/mandible .venv/bin/python tests/browser/check.py` passed in chromium, firefox and webkit, against the live site.
 - **Redeployed 2026-10-11** from commit `3dd622e` (site commit `46d17d5`): lobby, Ready Up, Rematch, sound, volume slider, maps and balance. Name scan clean; live browser check passed in all three engines.
+- **Redeployed again 2026-10-11** from commit `ac7cb2a` (site commit `34766d4`): batch 3 (TRIAGE rows 61–89) and the home page battle pictures (12 in `img/mandible/`, one at random). Live browser check passed in all three engines.
 
 ## Match History (TRIAGE row 88, 2026-10-11)
 
