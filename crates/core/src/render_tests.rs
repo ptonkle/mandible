@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::settings::{Format, MatchSettings, SeatKind};
-use crate::world::Command;
+use crate::world::{Command, Job};
 
 fn world(format: Format) -> World {
     let s = MatchSettings {

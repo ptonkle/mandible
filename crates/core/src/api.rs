@@ -144,8 +144,22 @@ impl Session {
             .unwrap_or_default()
     }
 
-    pub fn terrain(&self) -> Vec<u8> {
-        self.app.as_ref().map(|a| a.terrain()).unwrap_or_default()
+    pub fn terrain(&mut self) -> Vec<u8> {
+        self.app.as_mut().map(|a| a.terrain()).unwrap_or_default()
+    }
+
+    pub fn terrain_patch(&mut self) -> Vec<i32> {
+        self.app
+            .as_mut()
+            .map(|a| a.terrain_patch())
+            .unwrap_or_default()
+    }
+
+    pub fn terrain_patch_pixels(&mut self) -> Vec<u8> {
+        self.app
+            .as_mut()
+            .map(|a| a.terrain_patch_pixels())
+            .unwrap_or_default()
     }
 
     pub fn fog_stamp(&self) -> i32 {

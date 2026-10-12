@@ -41,3 +41,21 @@ fn twelve_hundred_ants_draw_within_budget() {
         t0.elapsed().as_millis()
     );
 }
+
+#[test]
+#[ignore]
+fn terrain_region_after_a_dig() {
+    use tool_core::render::terrain_region;
+    let w = bench_world(BENCH_SEED, Biome::Picnic);
+    let runs = 20;
+    let t0 = Instant::now();
+    for k in 0..runs {
+        let _ = terrain_region(&w, TERRAIN_SCALE, 40 + k, 40, 56 + k, 56);
+    }
+    eprintln!(
+        "TERRAIN: 16x16 cells in {} us, map {}x{}",
+        t0.elapsed().as_micros() / runs as u128,
+        w.map.w,
+        w.map.h
+    );
+}

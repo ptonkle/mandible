@@ -31,7 +31,7 @@ use crate::fog::Bits;
 use crate::map::Ground;
 use crate::rules::{Resource, Species, StructureKind, SATURATION};
 use crate::settings::Biome;
-use crate::world::{EffectKind, Job, Structure, World};
+use crate::world::{EffectKind, Structure, World};
 
 /// Draw-list units per screen pixel.
 pub const SUB_PX: i32 = 16;
@@ -42,6 +42,11 @@ pub const SCALE_ONE: i32 = 1024;
 pub const SCALE_MAX: i32 = 4096;
 /// Terrain image pixels per cell, the default the app should use.
 pub const TERRAIN_SCALE: i32 = 6;
+/// How far, in cells, one cell's change shows in the terrain image: the
+/// floor shade's two box blurs (2 cells each), the edge blur (1) and the
+/// bilinear sample (1). `App::terrain_patch` repaints this far round dug
+/// dirt.
+pub const TERRAIN_REACH: i32 = 6;
 /// Headings per species shape (0 = east, clockwise on screen).
 pub const HEADINGS: usize = 16;
 /// Zoom levels, in draw-list units (sixteenths of a pixel) per cell: from
@@ -1899,13 +1904,13 @@ fn draw_structure(list: &mut List, sight: &Sight, world: &World, s: &Structure) 
     }
 }
 
-/// Gatherers working each node (`Job::Gather`), by node index: counted
-/// the way `ants.rs` counts a node's load for Saturation, every colony's
-/// ants together.
+/// Gatherers working each node (`Ant::node`: walking to it, gathering, or
+/// carrying from it), by node index: counted the way `ants.rs` counts a
+/// node's load for Saturation, every colony's ants together.
 fn gatherers(world: &World) -> Vec<i32> {
     let mut load = vec![0; world.nodes.len()];
     for a in &world.ants {
-        if let Job::Gather(id) = a.job {
+        if let Some(id) = a.node() {
             if let Some(i) = world.node_index(id) {
                 load[i] += 1;
             }

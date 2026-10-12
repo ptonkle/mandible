@@ -128,8 +128,10 @@ pub enum Job {
     Idle,
     /// Gatherer: walking to, or gathering at, a node.
     Gather(Id),
-    /// Gatherer: taking its inventory to a queen.
-    Deliver,
+    /// Gatherer: taking its inventory to a queen, from the node it still
+    /// works (counted in that node's Saturation until it chooses again at
+    /// the queen), or from none.
+    Deliver(Option<Id>),
     /// Builder: fetching a blueprint's cost from a queen.
     Fetch(Id),
     /// Builder: carrying to a blueprint.
@@ -166,6 +168,15 @@ pub struct Ant {
 impl Ant {
     pub fn carried(&self) -> i32 {
         self.inventory.iter().sum()
+    }
+
+    /// The node a gatherer works: walking to it, gathering there, or
+    /// carrying from it to a queen. A node's Saturation counts these.
+    pub fn node(&self) -> Option<Id> {
+        match self.job {
+            Job::Gather(n) | Job::Deliver(Some(n)) => Some(n),
+            _ => None,
+        }
     }
 }
 
