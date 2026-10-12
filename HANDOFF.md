@@ -39,7 +39,21 @@ A fresh session starts from this file, not from memory.
 3. Commit as `ptonk <65458712+ptonkle@users.noreply.github.com>` and push.
 4. Run `BUILDER_ORIGIN=https://ptonkle.github.io/mandible .venv/bin/python tests/browser/check.py`.
 
-The battle pictures came from a throwaway scan of all-AI Imago matches, which was not kept. Seeds and settings for each picture are in TRIAGE row 66's session notes, if needed: format, seed, biome, map type and clock time, e.g. 2v2 seed 19 Flower Field Maze at 7:51.
+The battle pictures came from a throwaway headless scan of all-AI Imago matches (not kept). Each was captured with Fog of War Off, Map Size Normal, the format's default teams, then paused and cropped. Picture: format, seed, biome / Map Type, clock time.
+- 01: FFA, 7, Forest Floor / Open Ground, 7:14
+- 02: 2v2, 27, Picnic / Open Ground, 8:14
+- 03: 2v2, 19, Flower Field / Maze, 7:24
+- 04: FFA, 4, Riverbank / Maze, 7:17
+- 05: FFA, 28, Riverbank / Open Ground, 7:37
+- 06: 2v2, 23, Flower Field / Open Ground, 7:11
+- 07: 2v2, 17, Forest Floor / Maze, 9:27
+- 08: 2v2, 2, Riverbank / Tunnels, 7:02
+- 09: FFA, 18, Flower Field / Tunnels, 7:23
+- 10: FFA, 22, Picnic / Maze, 8:43
+- 11: 1v1, 23, Riverbank / Open Ground, 6:48
+- 12: 2v2, 19, Flower Field / Maze, 7:51
+
+Balance changes since then (batch 3 and later) change how these matches play out.
 
 ## What changed
 
