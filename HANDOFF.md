@@ -59,6 +59,16 @@ The details are in `SECOND-ORDER.md` rows 37–40.
 
 A fifth Main Menu leaf opens Match History. It holds the last 50 matches, numbered with no date, newest first; `crates/core/src/history.rs` does the work. `./scripts/check.sh` result on this branch: BUILDER CHECK PASSED, with the BROWSER CHECK PASSED in chromium, firefox and webkit, including the new Match History checks. The details are in `SECOND-ORDER.md` rows 47–51.
 
+## Feedback batch 3 merged (2026-10-11, TRIAGE rows 61–89)
+
+Six parallel agents (balance and species, movement and performance, match setup, in-match flow and sound, Match History, Menu Backgrounds), merged on main at the commit after `5b3e459`.
+- `./scripts/check.sh`: BUILDER CHECK PASSED (browser check in chromium, firefox, webkit).
+- `./scripts/check-online.sh`: ONLINE CHECK PASSED and ONLINE MATCH CHECK PASSED in three engines.
+- AI ladder: Imago beat Pupa 9/10 Tunnels (median 5:24), 10/10 Open Ground (5:37), 10/10 Maze (5:54); Pupa beat Larva 10/10 on all three.
+- Perf: 1,200 ants average tick 1.17 ms (was 2.9 ms). `map_generation_time` failed once on Maze (54.9 ms worst) while the browser checks ran alongside; alone it passed twice (43.9 ms worst).
+- SECOND-ORDER rows were renumbered 47–72 at merge, in merge order; agent notes in TRIAGE that cite "SECOND-ORDER row 47–53" use the agents' own numbers.
+- Open: TRIAGE row 66 (battle screenshots for the home page; the person picks the image).
+
 ## What passed
 
 `./scripts/check.sh` on 2026-10-11, commit `23c8f2a` (plus this file and MEASUREMENTS.md):
