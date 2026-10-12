@@ -1,6 +1,7 @@
 // The page draws what the core returns and decides nothing. It builds the
 // DOM from the core's view model (ui()), forwards keyboard, mouse and
-// transport events, and keeps the two settings strings in browser storage.
+// transport events, and keeps the core's settings and Match History text in
+// browser storage.
 import init, { Game, render_assets } from "./pkg/tool_shim.js";
 import { createRenderer } from "./render.js";
 
@@ -721,6 +722,8 @@ function refresh() {
     writeStore("defaults", ui.save.defaults);
     writeStore("player", ui.save.player);
   }
+  // Match History: the core's own text, kept as given (TRIAGE row 88).
+  if (ui.save_history !== undefined) writeStore("history", ui.save_history);
   if (ui.navigate) window.location.href = ui.navigate;
   if (ui.sounds) ui.sounds.forEach(play);
   // Messages first: a Leave or Dissolve goes out before the transport closes.
@@ -766,6 +769,7 @@ async function start() {
   crypto.getRandomValues(entropy);
   game = new Game(strings, glossary, readStore("defaults"), readStore("player"), crypto.randomUUID(), entropy[0]);
   hints = JSON.parse(game.hints());
+  game.act("history.load", readStore("history"), false, false);
   // `?codes`: the pasted-code path (Invite Code, Reply Code), for the
   // automated online check only.
   if (new URLSearchParams(location.search).has("codes")) game.act("flag.codes", "on", false, false);

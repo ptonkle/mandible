@@ -46,8 +46,9 @@
 
   <template id="leaf-template">
     <button class="leaf" type="button">
-      <!-- Four kinds of leaf; CSS shows one per main-menu button, in order:
-           oak (lobed), maple (pointed), willow (a long blade), lily pad (round). -->
+      <!-- Five kinds of leaf; CSS shows one per main-menu button, in order:
+           oak (lobed), maple (pointed), willow (a long blade), lily pad (round),
+           ginkgo (a notched fan). -->
       <svg class="leaf-shape oak" viewBox="0 0 200 80" aria-hidden="true">
         <path d="M6 40 C 14 30, 26 34, 32 24 C 38 12, 52 22, 60 14 C 70 4, 82 18, 94 10 C 106 2, 118 18, 130 10 C 142 4, 152 20, 164 16 C 178 14, 188 28, 194 40 C 188 52, 178 66, 164 64 C 152 60, 142 76, 130 70 C 118 62, 106 78, 94 70 C 82 62, 70 76, 60 66 C 52 58, 38 68, 32 56 C 26 46, 14 50, 6 40 Z"/>
         <path class="vein" d="M10 40 L 190 40 M 46 40 L 60 18 M 46 40 L 60 62 M 80 40 L 94 14 M 80 40 L 94 66 M 116 40 L 130 14 M 116 40 L 130 66 M 150 40 L 164 20 M 150 40 L 164 60"/>
@@ -63,6 +64,10 @@
       <svg class="leaf-shape lily" viewBox="0 0 200 80" aria-hidden="true">
         <path d="M100 40 L 188 28 A 92 37 0 1 0 188 52 Z"/>
         <path class="vein" d="M100 40 L 12 40 M 100 40 L 36 12 M 100 40 L 36 68 M 100 40 L 100 5 M 100 40 L 100 75 M 100 40 L 156 9 M 100 40 L 156 71"/>
+      </svg>
+      <svg class="leaf-shape ginkgo" viewBox="0 0 200 80" aria-hidden="true">
+        <path d="M6 38 L 70 38 C 100 12, 150 0, 196 12 C 192 28, 182 34, 168 40 C 182 46, 192 52, 196 68 C 150 80, 100 68, 70 42 L 6 42 Z"/>
+        <path class="vein" d="M8 40 L 70 40 M 70 40 L 188 16 M 70 40 L 160 6 M 70 40 L 176 32 M 70 40 L 176 48 M 70 40 L 160 74 M 70 40 L 188 64"/>
       </svg>
       <svg class="ant" viewBox="0 0 60 30" aria-hidden="true">
         <ellipse cx="12" cy="15" rx="10" ry="7"/>

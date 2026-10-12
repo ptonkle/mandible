@@ -212,7 +212,8 @@ mod tests {
                 "Play vs AI",
                 "Online Multiplayer",
                 "Match Settings",
-                "Player Settings"
+                "Player Settings",
+                "Match History"
             ]
         );
     }

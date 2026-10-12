@@ -17,6 +17,7 @@ pub mod bench;
 pub mod dice;
 pub mod fixed;
 pub mod fog;
+pub mod history;
 pub mod keys;
 pub mod lockstep;
 pub mod map;

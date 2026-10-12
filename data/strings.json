@@ -283,5 +283,15 @@
  "map_type.maze": "Maze",
  "biome.forest_floor": "Forest Floor",
  "biome.riverbank": "Riverbank",
- "keys.volume": "Volume"
+ "keys.volume": "Volume",
+ "menu.match_history": "Match History",
+ "history.match": "Match",
+ "history.result": "Result",
+ "history.mode": "Mode",
+ "history.conceded": "Conceded",
+ "history.spectate": "Spectate",
+ "history.older": "Older",
+ "history.newer": "Newer",
+ "history.clear": "Clear",
+ "history.clear_confirm": "Clear the Match History?"
 }
