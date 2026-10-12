@@ -514,20 +514,23 @@ fn species_parts(s: Species) -> Parts {
             mark.push(chevron(-50, 30, 24, 14));
             ((50, 30), 105)
         }
-        Species::Leafcutter => {
-            body.push(ellipse(-66, 0, 40, 30, 0, 16));
-            waist(&mut body, -18);
-            body.push(ellipse(0, 0, 22, 14, 0, 12));
-            body.push(ellipse(36, 0, 20, 18, 0, 14));
-            // The leaf it carries, held up over its head, with its veins.
-            body.push(lens((24, 0), 130, 84, 0));
-            bars(&mut mark, &[(36, 0), (146, 0)], 9);
-            for (x, l) in [(62, 26), (96, 22)] {
-                for side in [1, -1] {
-                    mark.push(bar((x, 0), (x + 20, l * side), 7));
-                }
-            }
-            ((36, 20), 95)
+        Species::Siege => {
+            // A broad abdomen and a flat head plate as wide as a door, for
+            // ramming structures; the mark is a ram along the back.
+            body.push(ellipse(-72, 0, 44, 34, 0, 16));
+            waist(&mut body, -22);
+            body.push(ellipse(2, 0, 24, 16, 0, 12));
+            body.push(mirrored(&[
+                (82, 0),
+                (82, -44),
+                (72, -54),
+                (38, -54),
+                (28, -44),
+                (28, 0),
+            ]));
+            mark.push(bar((-96, 0), (60, 0), 14));
+            mark.push(bar((70, -38), (70, 38), 14));
+            ((54, 30), 110)
         }
         Species::Fire => {
             // Slim and wasp-waisted, with a sting.
@@ -724,7 +727,8 @@ fn transform(template: &Shape, num: i32, den: i32, step: usize) -> Shape {
 /// (by role and Pop Cost), so size alone tells workers from fighters.
 fn drawn_radius(s: Species) -> i32 {
     let pct = match s {
-        Species::Harvester | Species::Leafcutter => 124,
+        Species::Harvester => 124,
+        Species::Siege => 140,
         Species::Fire => 132,
         Species::Carpenter => 140,
         Species::Soldier => 146,
@@ -2998,6 +3002,16 @@ fn upgrade_icon(list: &mut List, name: &str, colony: u8, full: i32) -> Option<()
                 along(top, u, full / 9, v, -full * 24 / 100),
             ];
             inked(list, colour, w, &head);
+        }
+        "training_rate" => {
+            // An egg hurrying forward.
+            let egg = ellipse(full * 60 / 100, c, full * 20 / 100, full * 27 / 100, 0, 16);
+            inked(list, colour, w, &egg);
+            for (y, x0) in [(36, 12), (50, 6), (64, 12)] {
+                let line = [at(x0, y), at(30, y)];
+                list.line(C_INK, full / 9, &line);
+                list.line(colour, full / 18, &line);
+            }
         }
         _ => return None,
     }

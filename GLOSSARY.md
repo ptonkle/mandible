@@ -126,7 +126,7 @@ How to read the tables:
 | --- | --- | --- | --- |
 | Ant | ★ | Any mobile creature a colony trains. In rules text "ants" does **not** include queens; say "ants and queens". | unit, creature, minion, troop, bug |
 | Species | ◆ | A kind of ant, such as Fire Ant. Waypoints, upgrades and training all work per species. | unit type, class, caste, breed, type |
-| Role | ◆ | A short tag for what a species does: Gatherer, Builder, Melee, Ranged, Tank, Support, Flyer, Brute, Bomber. Shown in tooltips. | job, archetype, class |
+| Role | ◆ | A short tag for what a species does: Gatherer, Builder, Melee, Ranged, Tank, Support, Flyer, Brute, Bomber, Siege. Shown in tooltips. | job, archetype, class |
 | Gatherer | ★ | Role: gathers and delivers resources by itself. | worker, drone, peon, villager, harvester (the role) |
 | Builder | ★ | Role: carries resources to blueprints and builds them, by itself. | worker, engineer, constructor |
 | Melee | ★ | Role: fights at contact range. | close combat, brawler |
@@ -134,8 +134,9 @@ How to read the tables:
 | Tank | ★ | Role: soaks damage with high health or armor. | tanky (as a noun), wall (never) |
 | Support | ◆ | Role: helps other ants, for example by healing. | healer (the role), medic |
 | Flyer | ★ | Role: flies over walls. Rock and dirt still block it. | air unit, flier |
-| Brute | ◆ | Role: heavy melee whose every hit deals Splash damage. | cleaver, ultralisk, siege |
+| Brute | ◆ | Role: heavy melee whose every hit deals Splash damage. | cleaver, ultralisk |
 | Bomber | ◆ | Role: dies on purpose to deal area damage. | suicide unit, kamikaze |
+| Siege | ◆ | Role: attacks structures first, with high Structure Damage. Added 2026-10-11 (TRIAGE row 63). | demolisher, wrecker |
 | Population | ★ | The total pop cost of all of a colony's ants. Shown against housing as "Population 120 / 150". | supply, food (that is a resource), pop count |
 | Housing | ★ | How much population a colony can support right now, provided by its queens and brood cells. It never exceeds the pop cap. | supply, pop limit, current cap, capacity |
 | Housing Full | ◆ | Population has reached housing, so training waits until more housing is built. | supply blocked, pop blocked, capped |
@@ -159,7 +160,7 @@ How to read the tables:
 | Exploding Ant | ★ | Bomber | 3 | Says exactly what it does. |
 | Trap-jaw Ant | ◆ | Melee | 3 | Heavy-hitting elite melee. "Trap-jaw" says a big bite. It replaces Bullet Ant, which players would read as ranged. |
 | Dinosaur Ant | ★ | Brute | 3 | Huge, slow brute whose every hit deals Splash damage (like StarCraft II's Ultralisk). "Dinosaur" says huge brute. It is also a real ant. |
-| Leafcutter Ant | ◆ | Gatherer | 2 | Optional. "Leafcutter" says it gathers Leaves, so it fits a Leaves specialist only, never a general gatherer. |
+| Siege Ant | ◆ | Siege | 2 | "Siege" says it breaks down structures. Weak against ants. Added 2026-10-11 (TRIAGE row 63), replacing the Leafcutter Ant, which was removed. |
 | Army Ant | ◆ | Melee | — | Reserved for a future civilization's swarm unit. "Army" says many fighters. |
 
 Rejected names. Do not reuse them without passing the naming test.
@@ -167,6 +168,7 @@ Rejected names. Do not reuse them without passing the naming test.
 | Name | Why it was rejected |
 | --- | --- |
 | Wood Ant | Players would expect a builder or wood gatherer, not an acid sprayer. |
+| Leafcutter Ant | A Leaves-only gatherer, removed on 2026-10-11 (TRIAGE row 63): the Siege Ant took its place. |
 | Bullet Ant | Players would expect a ranged shooter, not a melee ant. |
 | Honeypot Ant | Proposed as a mobile drop-off, which contradicts the decision that only queens are drop-offs. |
 | Bulldog Ant | Reads as melee, but is too close in meaning to Soldier Ant and Trap-jaw Ant. |
@@ -219,7 +221,9 @@ Rejected names. Do not reuse them without passing the naming test.
 | Attack Speed | ◆ | How often an ant attacks. Always written in full. | speed (alone), fire rate, cooldown |
 | Vision | ★ | How far an ant or queen sees, with line of sight. | sight range, view |
 | Heal Rate | ◆ | Health a Support species restores per second. | regen, healing power |
-| Build Rate | ◆ | How fast a Builder turns delivered resources into progress. | build speed, construction speed |
+| Build Rate | ◆ | How fast a Builder turns delivered resources into progress. Structures only. | build speed, construction speed |
+| Training Rate | ◆ | How fast queens and hatcheries train ants. A colony upgrade (TRIAGE row 70). | train speed, production speed |
+| Structure Damage | ◆ | What one attack deals to a structure or to dirt, in place of Damage. Shown only when it differs (Siege Ant). Never below 1. | building damage |
 | Attack | ★ | The verb: one ant hitting a target. | (never a stat name) |
 | Target | ◆ | What an ant is attacking. Chosen automatically. | focus, aggro |
 | Splash | ◆ | Damage dealt to every enemy in an area, as with Exploding Ants and Dinosaur Ants. | AoE (in UI text), blast |

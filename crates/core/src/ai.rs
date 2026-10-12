@@ -66,7 +66,7 @@ fn plan(d: Difficulty) -> Plan {
     match d {
         Difficulty::Larva => Plan {
             harvesters: 9,
-            carpenters: 2,
+            carpenters: 4,
             nests: 0,
             upgrades: false,
             attack_pop: 30,
@@ -75,7 +75,7 @@ fn plan(d: Difficulty) -> Plan {
         },
         Difficulty::Pupa => Plan {
             harvesters: 16,
-            carpenters: 3,
+            carpenters: 4,
             nests: 1,
             upgrades: true,
             attack_pop: 34,
@@ -84,7 +84,7 @@ fn plan(d: Difficulty) -> Plan {
         },
         Difficulty::Imago => Plan {
             harvesters: 14,
-            carpenters: 3,
+            carpenters: 4,
             nests: 2,
             upgrades: true,
             attack_pop: 33,
@@ -151,12 +151,16 @@ fn army_mix(w: &World, colony: u8, d: Difficulty) -> Vec<(Species, i32)> {
                 mix.push((Species::Acid, 4));
                 mix.push((Species::Turtle, 4));
                 mix.push((Species::Nurse, 1));
+                // Siege Ants break the queens and hatcheries the army is
+                // sent to.
+                mix.push((Species::Siege, 1));
             }
             _ => {
                 mix.push((Species::Acid, 4));
                 mix.push((Species::Turtle, 2));
                 mix.push((Species::Nurse, 1));
                 mix.push((Species::Fire, 2));
+                mix.push((Species::Siege, 1));
             }
         }
     }
@@ -562,20 +566,33 @@ pub fn decide(w: &World, colony: u8, d: Difficulty) -> Vec<Command> {
             .iter()
             .filter(|k| matches!(k, StructureKind::BroodCell | StructureKind::Queen))
             .count() as i32;
-        if housing < POP_CAP && pop + 6 >= housing + pending_housing * 15 {
-            let cost = StructureKind::BroodCell.stats().cost;
-            if afford(&stock, &cost) {
-                if let Some((x, y)) = find_spot(w, colony, StructureKind::BroodCell, home, 6) {
-                    out.push(Command::Place {
-                        kind: StructureKind::BroodCell,
-                        x,
-                        y,
-                        x2: x,
-                        y2: y,
-                    });
-                    spend(&mut stock, &cost);
-                }
+        // A brood cell adds 8 housing (TRIAGE row 71), so up to two are
+        // placed at once when the army grows fast.
+        let cell = StructureKind::BroodCell.stats();
+        let mut planned = pending_housing * cell.housing;
+        let mut placed: Option<(i32, i32)> = None;
+        for k in 0..2 {
+            if housing >= POP_CAP || pop + 8 < housing + planned || !afford(&stock, &cell.cost) {
+                break;
             }
+            // The second spot is searched farther out, clear of the first.
+            let Some((x, y)) = find_spot(w, colony, StructureKind::BroodCell, home, 6 + 4 * k)
+            else {
+                break;
+            };
+            if placed.is_some_and(|(px, py)| (px - x).abs() + (py - y).abs() < 4) {
+                break;
+            }
+            placed = Some((x, y));
+            out.push(Command::Place {
+                kind: StructureKind::BroodCell,
+                x,
+                y,
+                x2: x,
+                y2: y,
+            });
+            spend(&mut stock, &cell.cost);
+            planned += cell.housing;
         }
 
         // 2. Harvester Ants come first: one queued per queen while short.
@@ -730,6 +747,7 @@ pub fn decide(w: &World, colony: u8, d: Difficulty) -> Vec<Command> {
             if p.upgrades && !saving && d != Difficulty::Imago {
                 let wanted = [
                     Upgrade::GatherRate,
+                    Upgrade::TrainingRate,
                     Upgrade::Damage,
                     Upgrade::Armor,
                     Upgrade::Health,
@@ -753,6 +771,7 @@ pub fn decide(w: &World, colony: u8, d: Difficulty) -> Vec<Command> {
                 // is an army to protect the wait, it saves for the next one.
                 let wanted = [
                     Upgrade::Species(Species::Turtle),
+                    Upgrade::TrainingRate,
                     Upgrade::Armor,
                     Upgrade::Damage,
                     Upgrade::Species(Species::Acid),

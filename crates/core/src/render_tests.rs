@@ -849,7 +849,7 @@ fn upgrade_icons_differ_from_each_other_and_from_species() {
         assert_eq!((first.0, first.1[0]), (op::POLY, C_BASE), "{k} disc");
     }
     // The stat upgrades carry a glyph, not an ant.
-    for k in ["damage", "armor", "health", "build_rate"] {
+    for k in ["damage", "armor", "health", "build_rate", "training_rate"] {
         let l = icon_list(&format!("upgrade.{k}"), 1, 48).unwrap();
         assert!(
             ant_shapes_drawn(&l, player(1)).is_empty(),

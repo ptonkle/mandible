@@ -35,10 +35,13 @@ pub enum Focus {
 impl Focus {
     pub fn weights(self) -> [i32; 3] {
         match self {
-            // Food 3 : Nectar 1 : Leaves 2. Food pays for nearly everything
+            // Food 7 : Nectar 2 : Leaves 3. Food pays for nearly everything
             // and Leaves build; Nectar is wanted only from Tier 2 (TRIAGE
-            // row 52).
-            Focus::Balanced => [3, 1, 2],
+            // row 52). Leaves were 2 in 6 (a third of Harvester Ants), and
+            // a player left on Balanced piled up far more Leaves than the
+            // AIs, which sit on the Food focus most of the match (rows 67,
+            // 78); now a quarter.
+            Focus::Balanced => [7, 2, 3],
             Focus::Food => [3, 1, 1],
             Focus::Nectar => [1, 3, 1],
             Focus::Leaves => [1, 1, 3],
@@ -623,7 +626,9 @@ impl World {
             let start = [
                 (Species::Harvester, 6),
                 (Species::Soldier, 2),
-                (Species::Carpenter, 2),
+                // Four Carpenter Ants carry a queen's 200 Leaves in one trip
+                // (TRIAGE row 83).
+                (Species::Carpenter, 4),
             ];
             for (s, count) in start {
                 for _ in 0..count {
@@ -1119,7 +1124,7 @@ impl World {
 
     fn train(&mut self, colony: u8, s: Species, amount: Amount) -> Result<(), Refusal> {
         self.can_train(colony, s)?;
-        let st = s.stats();
+        let st = self.colonies[colony as usize].ranks.apply(s);
         let stock = self.colonies[colony as usize].stock;
         let room = (POP_CAP - self.population(colony) - self.queued_pop(colony)) / st.pop;
         if room <= 0 {
@@ -1567,6 +1572,20 @@ impl World {
                     .collect();
                 for a in self.ants.iter_mut().filter(|a| a.colony == colony) {
                     a.health += after[a.species.index()] - before[a.species.index()];
+                }
+                if u == Upgrade::TrainingRate {
+                    // Ants already queued train faster too, keeping the
+                    // share of training already done.
+                    let ranks = self.colonies[ci].ranks.clone();
+                    for s in self.structures.iter_mut().filter(|s| s.colony == colony) {
+                        for q in s.lane.iter_mut() {
+                            if let Work::Train(sp) = q.work {
+                                let total = ranks.apply(sp).train_ticks;
+                                q.progress = q.progress * total / q.total.max(1);
+                                q.total = total;
+                            }
+                        }
+                    }
                 }
                 self.announce(&format!("notice.upgraded.{}", u.key()), Some(colony), None);
             }

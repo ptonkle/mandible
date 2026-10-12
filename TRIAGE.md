@@ -68,27 +68,27 @@ One row per concrete change. Say what you did, what you expected, and what happe
 | 60 | — | A volume slider that is easy to reach | Volume was a 4-step choice in Player Settings only | *Done: Volume is a 0–100% slider (steps of 5) in Player Settings and in the in-match Menu (Esc); its value is sent when released and plays a click at the new level; old 4-step settings convert (Low 35%, Normal 70%, High 100%). Tests: the slider in both places and the conversion (core); the slider in the Menu (browser, three engines).* | done 2026-10-11 |
 | 61 | Opened Match Settings | Map Type Random (and a random map) by default | A fixed Map Type | (see Expected) | open |
 | 62 | Watched gathering | A node's Saturation counts only ants gathering from it (or walking to it), not ants that left it | The number drops while an ant is not gathering | (see Expected) | open |
-| 63 | Picked species | Siege Ants: bonus damage against structures; no Leafcutter Ant | Leafcutter Ant | (see Expected) | open |
+| 63 | Picked species | Siege Ants: bonus damage against structures; no Leafcutter Ant | Leafcutter Ant | *Done: Siege Ant (Tier 2, Siege Ant Hatchery; 60 Food, 20 Nectar, 30 Leaves; Pop Cost 2; 60 Health, 1 Armor; 3 Damage against ants, 30 Structure Damage against structures and dirt, every 1.5 s; goes for structures first). Role Siege; a flat door-plate head and a ram mark; its own icon. Leafcutter Ant removed from rules, AI, drawing, strings, glossary (moved to Rejected names) and README. Pupa and Imago field a few. Tests: hits a structure for 30; picks a structure before an ant.* | done 2026-10-11 |
 | 64 | Finished an Evolve | A sound of its own | The same Complete sound as upgrades | (see Expected) | open |
 | 65 | Looked at the browser tab | A tab icon | None | (see Expected) | open |
 | 66 | Opened the GitHub page | A tile grid of screenshots of big ant battles | Text only | (see Expected) | open |
-| 67 | Gathered with Balanced | Fewer Leaves | Too many Leaves | (see Expected) | open |
-| 68 | Built brood cells | Brood cells see farther | Short sight | (see Expected) | open |
-| 69 | Bought Gather Rate | Costs more, gives more; not a no-brainer | Too cheap for its bonus | (see Expected) | open |
-| 70 | Looked at Build Rate | A Training Rate upgrade (Build Rate is only for structures) | — | (see Expected) | open |
-| 71 | Built brood cells | Half the housing (15 → 8) | 15 each | (see Expected) | open |
+| 67 | Gathered with Balanced | Fewer Leaves | Too many Leaves | *Done with row 78.* | done 2026-10-11 |
+| 68 | Built brood cells | Brood cells see farther | Short sight | *Done: brood cell Vision 6 → 10 cells.* | done 2026-10-11 |
+| 69 | Bought Gather Rate | Costs more, gives more; not a no-brainer | Too cheap for its bonus | *Done: Gather Rate 100 Food + 60 Leaves a rank for +20% → 200 Food + 120 Leaves a rank for +30% (I–III).* | done 2026-10-11 |
+| 70 | Looked at Build Rate | A Training Rate upgrade (Build Rate is only for structures) | — | *Done: Training Rate (Colony tab, C): +25% a rank (I–II; Soldier Ant 8 s → 6.4 s → 5.3 s), 120 Food + 40 Nectar + 100 Leaves a rank; ants already queued speed up too. Build Rate stays structures only. Test worked by hand: 10 Soldier Ants with Training Rate I, the tenth out at tick 1,380 (1,600 without).* | done 2026-10-11 |
+| 71 | Built brood cells | Half the housing (15 → 8) | 15 each | *Done: brood cell housing 15 → 8 (still 60 Leaves); the AI places up to two at once.* | done 2026-10-11 |
 | 72 | Placement refused | No sound; the blueprint stays on the cursor to try elsewhere | A Warning, and placement ends | (see Expected) | open |
 | 73 | Placed in build mode | A ring around each queen showing where building is allowed | — | (see Expected) | open |
 | 74 | Played 2v2 | No lag | Lag | (see Expected) | open |
 | 75 | Heard sounds | Quieter overall; no sound when a queen dies | Too loud; Alert on Queen Lost | (see Expected) | open |
 | 76 | Last human conceded | An option to end the match fully | — | (see Expected) | open |
 | 77 | Match ended | The whole map is shown | Fog stays | (see Expected) | open |
-| 78 | Read the end graphs | Players and AIs gather similar Leaves; fewer Leaves overall (costs higher, rate lower or lower priority) | Far more Leaves than the AIs; too many | (see Expected) | open |
+| 78 | Read the end graphs | Players and AIs gather similar Leaves; fewer Leaves overall (costs higher, rate lower or lower priority) | Far more Leaves than the AIs; too many | *Done: a player on Balanced (Food 3 : Nectar 1 : Leaves 2) put a third of Harvester Ants on Leaves; the AI sits on the Food focus (a fifth on Leaves). Balanced is now 7 : 2 : 3 (a quarter); Leaves are spent on more (Evolve, Gather Rate, Training Rate, Siege Ant, twice as many brood cells). See SECOND-ORDER row 47.* | done 2026-10-11 |
 | 79 | Opened Match Settings | The Map Type selector shows the whole "Open Ground" | Cut off | (see Expected) | open |
 | 80 | Set up a match | Free choice of Team 1–4 per player, defaulting by format | Teams assumed from format | (see Expected) | open |
 | 81 | Started a match | Never every colony on one team | A match started with everyone on one team | (see Expected) | open |
-| 82 | Evolved | Evolve is a bigger investment | Too cheap | (see Expected) | open |
-| 83 | Started a match | Enough Carpenter Ants to carry a queen's cost in one trip | Several trips | (see Expected) | open |
+| 82 | Evolved | Evolve is a bigger investment | Too cheap | *Done: Evolve to Tier 2: 300 Food, 150 Nectar, 20 s → 400 Food, 150 Nectar, 150 Leaves, 35 s. Tier 3: 500/300/100, 30 s → 700/400/250, 50 s.* | done 2026-10-11 |
+| 83 | Started a match | Enough Carpenter Ants to carry a queen's cost in one trip | Several trips | *Done: 4 Carpenter Ants at the start (was 2): 4 × 50 = a queen's 200 Leaves. Population starts at 12 / 20.* | done 2026-10-11 |
 | 84 | Only AIs left in a match | A way out besides reloading | None | (see Expected) | open |
 | 85 | Watched ants | Less overlap between ants | Ants overlap too much | (see Expected) | open |
-| 86 | Fought | Every attack does at least 1 damage | Some attacks do 0 | (see Expected) | open |
+| 86 | Fought | Every attack does at least 1 damage | Some attacks do 0 | *Done: structures and dirt took raw Damage with no floor, so a Nurse Ant breaking out of a retreat dealt 0. Every hit now deals at least 1 (`structure_damage_taken`). Tests: every species, rank and armor ≥ 1; a retreating Nurse Ant chips an enemy wall.* | done 2026-10-11 |

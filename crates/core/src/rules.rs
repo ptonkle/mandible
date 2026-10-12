@@ -90,7 +90,7 @@ pub enum Species {
     Harvester,
     Soldier,
     Carpenter,
-    Leafcutter,
+    Siege,
     Fire,
     Turtle,
     Acid,
@@ -113,6 +113,7 @@ pub enum Role {
     Flyer,
     Brute,
     Bomber,
+    Siege,
 }
 
 impl Role {
@@ -127,6 +128,7 @@ impl Role {
             Role::Flyer => "flyer",
             Role::Brute => "brute",
             Role::Bomber => "bomber",
+            Role::Siege => "siege",
         }
     }
 }
@@ -154,6 +156,9 @@ pub struct Stats {
     pub vision: i32,
     /// Splash radius in sub-units; 0 means single target.
     pub splash: i32,
+    /// Damage one attack deals to a structure or dirt; 0 means the same as
+    /// `damage` (TRIAGE row 63: Siege Ants).
+    pub structure_damage: i32,
     pub heal: i32,
     pub carry: i32,
     /// Ticks to gather one resource (after `Ranks::apply`: tenths of a tick).
@@ -180,6 +185,7 @@ const BASE: Stats = Stats {
     radius: 112,
     vision: 7,
     splash: 0,
+    structure_damage: 0,
     heal: 0,
     carry: 0,
     gather_ticks: 0,
@@ -193,7 +199,7 @@ impl Species {
         Species::Harvester,
         Species::Soldier,
         Species::Carpenter,
-        Species::Leafcutter,
+        Species::Siege,
         Species::Fire,
         Species::Turtle,
         Species::Acid,
@@ -217,7 +223,7 @@ impl Species {
             Species::Harvester => "harvester",
             Species::Soldier => "soldier",
             Species::Carpenter => "carpenter",
-            Species::Leafcutter => "leafcutter",
+            Species::Siege => "siege",
             Species::Fire => "fire",
             Species::Turtle => "turtle",
             Species::Acid => "acid",
@@ -244,6 +250,13 @@ impl Species {
 
     pub fn flies(self) -> bool {
         self == Species::Flying
+    }
+
+    /// Combat species with an upgrade of their own. The Siege Ant has none:
+    /// its Structure Damage is its whole point, and the Damage upgrade adds
+    /// to it.
+    pub fn has_species_upgrade(self) -> bool {
+        self.is_combat() && self != Species::Siege
     }
 
     /// Trained by a queen rather than a hatchery.
@@ -285,18 +298,23 @@ impl Species {
                 build: 1,
                 ..BASE
             },
-            Species::Leafcutter => Stats {
-                role: Role::Gatherer,
+            Species::Siege => Stats {
+                // TRIAGE row 63: weak against ants, five times a Soldier
+                // Ant's hit against structures and dirt. Leaves in its cost
+                // give Leaves a use beyond building (row 78).
+                role: Role::Siege,
                 tier: 2,
-                cost: [50, 20, 0],
-                train_ticks: ticks(80),
-                health: 30,
-                speed: 77,
+                cost: [60, 20, 30],
+                pop: 2,
+                train_ticks: ticks(100),
+                health: 60,
+                armor: 1,
+                damage: 3,
+                structure_damage: 30,
+                attack_ticks: ticks(15),
+                speed: 64,
+                radius: 128,
                 vision: 6,
-                carry: 20,
-                gather_ticks: ticks(2),
-                laden_pct: 90,
-                only_gathers: Some(Resource::Leaves),
                 ..BASE
             },
             Species::Fire => Stats {
@@ -477,12 +495,14 @@ impl StructureKind {
                 radius: 2 * CELL + CELL / 2,
                 tier: 1,
             },
+            // TRIAGE rows 68 and 71: half the housing (15 -> 8) for the same
+            // 60 Leaves, and it sees farther (6 -> 10 cells, like a queen).
             StructureKind::BroodCell => StructureStats {
                 cost: [0, 0, 60],
                 health: 300,
                 work: ticks(100),
-                housing: 15,
-                vision: 6,
+                housing: 8,
+                vision: 10,
                 radius: CELL + CELL / 4,
                 tier: 1,
             },
@@ -525,6 +545,8 @@ pub enum Upgrade {
     GatherRate,
     CarryCapacity,
     BuildRate,
+    /// Faster training at queens and hatcheries (TRIAGE row 70).
+    TrainingRate,
     Species(Species),
 }
 
@@ -537,6 +559,7 @@ impl Upgrade {
             Upgrade::GatherRate => "gather_rate".into(),
             Upgrade::CarryCapacity => "carry_capacity".into(),
             Upgrade::BuildRate => "build_rate".into(),
+            Upgrade::TrainingRate => "training_rate".into(),
             Upgrade::Species(s) => format!("species.{}", s.key()),
         }
     }
@@ -549,9 +572,10 @@ impl Upgrade {
             Upgrade::GatherRate,
             Upgrade::CarryCapacity,
             Upgrade::BuildRate,
+            Upgrade::TrainingRate,
         ];
         for s in Species::ALL {
-            if s.is_combat() {
+            if s.has_species_upgrade() {
                 v.push(Upgrade::Species(s));
             }
         }
@@ -567,6 +591,7 @@ impl Upgrade {
             Upgrade::Damage | Upgrade::Armor | Upgrade::Health | Upgrade::GatherRate => 3,
             Upgrade::CarryCapacity => 2,
             Upgrade::BuildRate => 1,
+            Upgrade::TrainingRate => 2,
             Upgrade::Species(_) => 2,
         }
     }
@@ -584,9 +609,12 @@ impl Upgrade {
         match self {
             Upgrade::Damage | Upgrade::Armor => [100 * r, 60 * r, 0],
             Upgrade::Health => [120 * r, 50 * r, 0],
-            Upgrade::GatherRate => [100 * r, 0, 60 * r],
+            // TRIAGE row 69: twice the cost of before for +30% a rank (was
+            // +20%), so it competes with Harvester Ants and the army.
+            Upgrade::GatherRate => [200 * r, 0, 120 * r],
             Upgrade::CarryCapacity => [80 * r, 0, 80 * r],
             Upgrade::BuildRate => [60, 0, 120],
+            Upgrade::TrainingRate => [120 * r, 40 * r, 100 * r],
             Upgrade::Species(_) => [80 * r, 80 * r, 0],
         }
     }
@@ -605,13 +633,20 @@ impl Upgrade {
     }
 }
 
-/// Cost and duration of evolving to `tier`.
+/// Cost and duration of evolving to `tier`. TRIAGE row 82: a bigger
+/// investment than before (Tier 2 was 300 Food, 150 Nectar, 20 s; Tier 3
+/// 500 Food, 300 Nectar, 100 Leaves, 30 s).
 pub fn evolve_cost(tier: u8) -> (Cost, i32) {
     match tier {
-        2 => ([300, 150, 0], ticks(200)),
-        _ => ([500, 300, 100], ticks(300)),
+        2 => ([400, 150, 150], ticks(350)),
+        _ => ([700, 400, 250], ticks(500)),
     }
 }
+
+/// Gather Rate per rank, in percent (TRIAGE row 69).
+pub const GATHER_RATE_PCT: i32 = 30;
+/// Training Rate per rank, in percent (TRIAGE row 70).
+pub const TRAINING_RATE_PCT: i32 = 25;
 
 /// A colony's upgrade ranks, indexed by `Upgrade::all()` order.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -622,6 +657,8 @@ pub struct Ranks {
     pub gather_rate: u8,
     pub carry_capacity: u8,
     pub build_rate: u8,
+    #[serde(default)]
+    pub training_rate: u8,
     pub species: [u8; 12],
 }
 
@@ -634,6 +671,7 @@ impl Ranks {
             Upgrade::GatherRate => self.gather_rate,
             Upgrade::CarryCapacity => self.carry_capacity,
             Upgrade::BuildRate => self.build_rate,
+            Upgrade::TrainingRate => self.training_rate,
             Upgrade::Species(s) => self.species[s.index()],
         }
     }
@@ -646,6 +684,7 @@ impl Ranks {
             Upgrade::GatherRate => &mut self.gather_rate,
             Upgrade::CarryCapacity => &mut self.carry_capacity,
             Upgrade::BuildRate => &mut self.build_rate,
+            Upgrade::TrainingRate => &mut self.training_rate,
             Upgrade::Species(s) => &mut self.species[s.index()],
         };
         *slot = (*slot + 1).min(u.max_rank());
@@ -657,13 +696,17 @@ impl Ranks {
         let sr = self.species[s.index()] as i32;
         if s.is_combat() && st.damage > 0 {
             st.damage += self.damage as i32;
+            if st.structure_damage > 0 {
+                st.structure_damage += self.damage as i32;
+            }
         }
         st.armor += self.armor as i32;
         st.health += st.health * 10 * self.health as i32 / 100;
         if st.gather_ticks > 0 {
-            // +20% gather rate per rank: fewer ticks per resource, in tenths.
+            // Gather rate per rank: fewer ticks per resource, in tenths.
             st.gather_ticks *= 10;
-            st.gather_ticks = st.gather_ticks * 100 / (100 + 20 * self.gather_rate as i32);
+            st.gather_ticks =
+                st.gather_ticks * 100 / (100 + GATHER_RATE_PCT * self.gather_rate as i32);
         } else {
             st.gather_ticks *= 10;
         }
@@ -675,6 +718,8 @@ impl Ranks {
         if st.build > 0 {
             st.build *= 2 + self.build_rate as i32;
         }
+        st.train_ticks =
+            st.train_ticks * 100 / (100 + TRAINING_RATE_PCT * self.training_rate as i32);
         match s {
             Species::Soldier => st.health += 15 * sr,
             Species::Fire => st.speed += st.speed * 15 * sr / 100,
@@ -694,6 +739,18 @@ impl Ranks {
 /// Damage taken from one hit: flat armor, never below `MIN_DAMAGE`.
 pub fn damage_taken(damage: i32, armor: i32) -> i32 {
     (damage - armor).max(MIN_DAMAGE)
+}
+
+/// Damage one attack deals to a structure or to dirt, never below
+/// `MIN_DAMAGE` (TRIAGE row 86: even an ant with no Damage, such as a
+/// retreating Nurse Ant breaking through a wall).
+pub fn structure_damage_taken(st: &Stats) -> i32 {
+    let d = if st.structure_damage > 0 {
+        st.structure_damage
+    } else {
+        st.damage
+    };
+    damage_taken(d, 0)
 }
 
 #[cfg(test)]
@@ -776,6 +833,92 @@ mod tests {
         for s in StructureKind::all() {
             assert_eq!(StructureKind::from_key(&s.key()), Some(s));
         }
+    }
+
+    #[test]
+    fn every_attack_deals_at_least_one_on_every_path() {
+        // TRIAGE row 86: against ants at any armor, against structures and
+        // dirt, for every species (even those with no Damage, such as the
+        // Nurse Ant) at every rank of Damage and its species upgrade.
+        for s in Species::ALL {
+            for dmg in 0..=3 {
+                for sr in 0..=2 {
+                    let mut r = Ranks {
+                        damage: dmg,
+                        ..Ranks::default()
+                    };
+                    r.species[s.index()] = sr;
+                    let st = r.apply(s);
+                    for armor in 0..=40 {
+                        assert!(damage_taken(st.damage, armor) >= 1, "{s:?} vs {armor}");
+                    }
+                    assert!(structure_damage_taken(&st) >= 1, "{s:?} on a structure");
+                }
+            }
+        }
+        assert_eq!(structure_damage_taken(&Species::Nurse.stats()), 1);
+        assert_eq!(structure_damage_taken(&Species::Soldier.stats()), 6);
+        assert_eq!(structure_damage_taken(&Species::Siege.stats()), 30);
+        // The Damage upgrade adds to Structure Damage too.
+        let r = Ranks {
+            damage: 2,
+            ..Ranks::default()
+        };
+        assert_eq!(structure_damage_taken(&r.apply(Species::Siege)), 32);
+    }
+
+    #[test]
+    fn siege_ants_replace_leafcutters_at_tier_two_with_a_hatchery() {
+        let st = Species::Siege.stats();
+        assert_eq!((st.tier, st.role), (2, Role::Siege));
+        assert!(st.structure_damage >= 5 * Species::Soldier.stats().damage);
+        assert!(st.damage < Species::Soldier.stats().damage);
+        assert!(!Species::Siege.from_queen());
+        assert_eq!(Species::from_key("leafcutter"), None);
+        assert!(!Upgrade::all().contains(&Upgrade::Species(Species::Siege)));
+    }
+
+    #[test]
+    fn brood_cells_house_eight_and_see_ten_cells() {
+        // TRIAGE rows 68 and 71.
+        let b = StructureKind::BroodCell.stats();
+        assert_eq!((b.housing, b.vision), (8, 10));
+    }
+
+    #[test]
+    fn gather_rate_costs_more_and_gives_thirty_percent_a_rank() {
+        // TRIAGE row 69. A Harvester Ant takes 6 ticks (60 tenths) a
+        // resource; Gather Rate I: 60 * 100 / 130 = 46; III: 60 * 100 / 190
+        // = 31.
+        let mut r = Ranks::default();
+        assert_eq!(r.apply(Species::Harvester).gather_ticks, 60);
+        r.raise(Upgrade::GatherRate);
+        assert_eq!(r.apply(Species::Harvester).gather_ticks, 46);
+        r.raise(Upgrade::GatherRate);
+        r.raise(Upgrade::GatherRate);
+        assert_eq!(r.apply(Species::Harvester).gather_ticks, 31);
+        assert_eq!(Upgrade::GatherRate.cost(1), [200, 0, 120]);
+    }
+
+    #[test]
+    fn training_rate_is_a_two_rank_colony_upgrade() {
+        // TRIAGE row 70: 160 ticks -> 128 (I) -> 106 (II); Build Rate is
+        // untouched.
+        let mut r = Ranks::default();
+        r.raise(Upgrade::TrainingRate);
+        assert_eq!(r.apply(Species::Soldier).train_ticks, 128);
+        r.raise(Upgrade::TrainingRate);
+        r.raise(Upgrade::TrainingRate);
+        assert_eq!(r.training_rate, 2);
+        assert_eq!(r.apply(Species::Soldier).train_ticks, 106);
+        assert_eq!(r.apply(Species::Carpenter).build, 2);
+    }
+
+    #[test]
+    fn evolving_costs_more_and_takes_longer() {
+        // TRIAGE row 82.
+        assert_eq!(evolve_cost(2), ([400, 150, 150], ticks(350)));
+        assert_eq!(evolve_cost(3), ([700, 400, 250], ticks(500)));
     }
 
     #[test]

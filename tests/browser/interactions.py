@@ -7,7 +7,8 @@ shows. Expected values are worked out by hand from the brief and the rules
 
 - Starting resources at Normal are 300 Food, 100 Nectar, 200 Leaves.
 - A Harvester Ant costs 50 Food, so training one leaves 250 Food.
-- A queen houses 20, and a colony starts with 10 ants (Population 10 / 20).
+- A queen houses 20, and a colony starts with 12 ants (Population 12 / 20):
+  six Harvester Ants, two Soldier Ants and four Carpenter Ants.
 """
 
 import json
@@ -98,7 +99,7 @@ def run(page, check, engine):
     food = text(page, "#resources .res.food .value")
     check(food == "300", f"a match starts with 300 Food (Normal) [{food}]")
     pop = page.locator("#resources .res .value").nth(3).inner_text()
-    check(pop == "10 / 20", f"Population starts at 10 / 20 [{pop}]")
+    check(pop == "12 / 20", f"Population starts at 12 / 20 [{pop}]")
     # Army (row 48): the 2 starting Soldier Ants, Pop Cost 1 each.
     combat = text(page, "#resources .res.combat_ants .value")
     check(combat == "2 · " + STRINGS["stat.pop_cost"] + " 2", f"the top bar shows Army 2 · Pop Cost 2 [{combat}]")
