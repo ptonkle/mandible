@@ -109,12 +109,28 @@ impl Biome {
 #[serde(rename_all = "snake_case")]
 pub enum MapType {
     /// Chambers joined by tunnels.
-    #[default]
     Tunnels,
     /// Open ground with blobs of rock.
     Open,
     /// Open ground crossed by thin, connected rock walls.
     Maze,
+    /// One of the three, chosen by the seed at match start (TRIAGE row 61).
+    #[default]
+    Random,
+}
+
+impl MapType {
+    /// Every Map Type a map can have (Random excluded).
+    pub const ALL: [MapType; 3] = [MapType::Tunnels, MapType::Open, MapType::Maze];
+
+    /// Random becomes one of the three, chosen by the seed, the same on
+    /// every peer; any other Map Type stays itself.
+    pub fn resolve(self, seed: u64) -> MapType {
+        match self {
+            MapType::Random => MapType::ALL[(seed % MapType::ALL.len() as u64) as usize],
+            t => t,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Default)]
@@ -144,6 +160,12 @@ pub struct MatchSettings {
     /// Sandbox: human colonies have unlimited resources and start at Tier 3.
     pub sandbox: bool,
     pub map_type: MapType,
+    /// Each seat's team (0-based), set in Play vs AI or the Lobby (TRIAGE
+    /// row 80). Empty, or shorter than the seats, means the format's
+    /// default for the seats it leaves out. Not saved with Default Match
+    /// Settings.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub teams: Vec<u8>,
 }
 
 impl Default for MatchSettings {
@@ -161,12 +183,16 @@ impl Default for MatchSettings {
             disabled: Vec::new(),
             map_revealed: false,
             sandbox: false,
-            map_type: MapType::Tunnels,
+            map_type: MapType::Random,
+            teams: Vec::new(),
         }
     }
 }
 
 pub const TUNNEL_MIN: i32 = 10;
+
+/// The most teams a match can have: one per seat.
+pub const TEAM_COUNT: u8 = 4;
 pub const TUNNEL_MAX: i32 = 16;
 
 /// Why a settings value cannot be used. The page shows the label-value form.
@@ -175,6 +201,8 @@ pub enum SettingsError {
     NotReadable(String),
     TunnelWidth(i32),
     Essential(Species),
+    /// A team outside Team 1–4, or more teams listed than seats.
+    Team(u8),
 }
 
 impl SettingsError {
@@ -185,6 +213,9 @@ impl SettingsError {
                 format!("Tunnel Width: {w} (allowed {TUNNEL_MIN}–{TUNNEL_MAX})")
             }
             SettingsError::Essential(s) => format!("Disabled: {} cannot be disabled", s.key()),
+            SettingsError::Team(t) => {
+                format!("Team: {} (allowed 1–{TEAM_COUNT})", *t as i32 + 1)
+            }
         }
     }
 }
@@ -199,7 +230,38 @@ impl MatchSettings {
                 return Err(SettingsError::Essential(*s));
             }
         }
+        if let Some(t) = self.teams.iter().find(|t| **t >= TEAM_COUNT) {
+            return Err(SettingsError::Team(*t));
+        }
+        if self.teams.len() > TEAM_COUNT as usize {
+            return Err(SettingsError::Team(self.teams.len() as u8 - 1));
+        }
         Ok(())
+    }
+
+    /// The team of a seat: the one chosen for it, else the format's default.
+    pub fn team_of(&self, seat: usize) -> u8 {
+        self.teams
+            .get(seat)
+            .copied()
+            .unwrap_or_else(|| self.format.team_of(seat))
+    }
+
+    /// Every seat's team, the format's default where none is chosen.
+    pub fn seat_teams(&self) -> Vec<u8> {
+        (0..self.format.seats()).map(|i| self.team_of(i)).collect()
+    }
+
+    /// Sets one seat's team; the other seats keep theirs (their defaults
+    /// written out). False if the seat or team is out of range.
+    pub fn set_team(&mut self, seat: usize, team: u8) -> bool {
+        if seat >= self.format.seats() || team >= TEAM_COUNT {
+            return false;
+        }
+        let mut teams = self.seat_teams();
+        teams[seat] = team;
+        self.teams = teams;
+        true
     }
 
     pub fn parse(json: &str) -> Result<MatchSettings, SettingsError> {
@@ -218,6 +280,15 @@ impl MatchSettings {
 /// they can never be disabled.
 pub fn can_disable(s: Species) -> bool {
     !matches!(s, Species::Harvester | Species::Carpenter)
+}
+
+/// How many teams have a colony among the seats that are played. A match
+/// starts only with at least two (TRIAGE row 81).
+pub fn team_count<I: IntoIterator<Item = u8>>(played_teams: I) -> usize {
+    let mut seen: Vec<u8> = played_teams.into_iter().collect();
+    seen.sort();
+    seen.dedup();
+    seen.len()
 }
 
 /// Who sits in a seat for a match.

@@ -53,7 +53,8 @@ How to read the tables:
 | Pupa | ★ | The middle difficulty. Term hint: "Pupa: a moderately capable AI." | Moderate, Medium, Normal |
 | Imago | ★ | The strongest difficulty; the word means a fully grown adult insect. Wherever difficulties are listed, they appear in order Larva → Pupa → Imago, so the order is visible. Term hint: "Imago: the most capable AI." | Hard, Expert, Insane |
 | Colony | ◆ | Everything one player owns: ants, queens, walls, blueprints, stockpile, upgrades. | faction, civ, empire |
-| Team | ◆ | The colonies that win or lose together. In 1v1 and free-for-all, each colony is its own team. | side, alliance |
+| Team | ◆ | The colonies that win or lose together, Team 1–4. Each seat's team is chosen freely in Play vs AI and the Lobby (the host sets any seat's, a joined player its own); the format sets the defaults (1v1: Team 1, 2; 2v2: Team 1, 1, 2, 2; Free-for-all: Team 1–4), and changing the format brings them back. | side, alliance |
+| Teams | ◆ | Label for how many teams the played seats make (Closed seats are not played). Shown only while it is 1, as "Teams: 1 · Requires: 2 Teams", and Start is refused until it is at least 2. | sides, factions |
 | Ally | ◆ | Another colony on your team. | friend, teammate (in UI text) |
 | Enemy | ◆ | Any colony not on your team. | opponent (in UI text), foe |
 | Player color | ★ | The single color that marks everything a colony owns. | team color |
@@ -318,7 +319,7 @@ Rejected names. Do not reuse them without passing the naming test.
 | Keep Watching | ◆ | After the last human is defeated: watch the AIs play on, with the whole map shown. End Match stays in the Menu. | observe |
 | Match Ended | ◆ | The end screen's title when a spectator chose End Match: no team won. | |
 | Map Size, Chamber Size | ★ | Match Settings for the size of the map and of its chambers: Small, Normal or Large. | map scale, room size |
-| Map Type | ★ | The Match Setting for the map's shape: Tunnels, Open Ground or Maze. Every type is rotation-symmetric, keeps every home reachable without digging, and keeps the narrowest gap at least the Tunnel Width. | map style, layout, terrain type |
+| Map Type | ★ | The Match Setting for the map's shape: Tunnels, Open Ground, Maze or Random (the default: the seed picks one of the three when the match starts). Every type is rotation-symmetric, keeps every home reachable without digging, and keeps the narrowest gap at least the Tunnel Width. | map style, layout, terrain type |
 | Tunnels, Open Ground, Maze | ★ | The three Map Types. Tunnels: chambers joined by tunnels. Open Ground: open ground with blobs of rock. Maze: open ground crossed by thin, connected rock walls with gaps; some wall stretches are dirt. "Open Ground" is never shortened to "Open", which is a lobby seat state. | caves, arena, labyrinth, open map |
 | Hill Won, Hill Ended | ◆ | Announcements when a Hill closes: won by a team, or ended with no single holder. | captured, tied |
 | Play vs AI | ★ | Main-menu choice: a local match against AI players. | skirmish, single player, practice |
@@ -329,7 +330,7 @@ Rejected names. Do not reuse them without passing the naming test.
 | Game Speed | ★ | A match setting that scales how fast time runs. | tick rate, speed (alone) |
 | Small, Normal, Large / Low, Normal, High | ◆ | Values of Map Size and Chamber Size (Small, Normal, Large) and of Resource Density and Starting Resources (Low, Normal, High). | tiny, huge, rich, poor |
 | On, Off | ◆ | Values of two-way settings such as Events and Edge Pan. | yes, no, enabled |
-| Random | ◆ | A Biome or Seed chosen by the game. | auto |
+| Random | ◆ | A Biome, Map Type or Seed chosen by the game. | auto |
 | Events | ★ | The Match Setting that turns Windfalls and Hills on or off. | random events |
 | Resource Density | ★ | A match setting for how much each node holds and how many nodes there are. | richness, abundance |
 | Starting Resources | ★ | A match setting: the stockpile each colony begins with. | starting bank, initial resources |
@@ -357,8 +358,8 @@ Added for TRIAGE rows 37, 40, 41, 43 and 49. Shown on screen; proposed until the
 | Term | Origin | Meaning | Never say |
 | --- | --- | --- | --- |
 | Player Name | ◆ | The name a person picks on the Online Multiplayer screen (at most 16 characters), kept in Player Settings. It labels their seat in the Lobby and in Waiting On. Empty shows "Player". | username, nickname, handle, gamertag |
-| Copy | ◆ | The button beside the Room Code that puts it on the clipboard. | share, clip |
-| Ready Up, Readied | ◆ | Lobby only. Ready Up is the button a joined player presses when set to play; pressing it again undoes it. A seat that pressed it is Readied, shown in the seat's Status. The host's Start is enabled only when every joined player is Readied; a change to the Match Settings clears every mark. Not the action-button state Ready. Term hint: "Press again to undo; the host can Start once every joined player is Readied." | unready, check in, confirm |
+| Copy, Copied | ◆ | Copy is the button joined to the Room Code (one bordered group with the code) that puts it on the clipboard; for a moment after a press it reads Copied. | share, clip |
+| Ready Up, Ready | ◆ | Lobby only. Ready Up is the button a joined player presses when set to play; pressing it again undoes it. A seat that pressed it shows Ready in its Status (the same word as the action-button state Ready; the Lobby's Status column keeps them apart). The host's Start is enabled only when every joined player is Ready; a change to the Match Settings or to a team clears every mark. Term hint: "Press again to undo; the host can Start once every joined player is Ready." Was "Readied" until TRIAGE row 87's round. | unready, readied, check in, confirm |
 | Rematch | ★ | End-screen button. Play vs AI: a new match with the same Match Settings and seats on a new seed. Online, the host's Rematch brings every player back to the same Lobby, with Readied cleared. | replay, play again, restart |
 | Not Connected, Connecting, In Lobby, Refused, Lobby Closed, Connection Lost | ◆ | The values of Status on the Online Multiplayer screen and in the Lobby: no online session; waiting to reach the host; seated in a lobby; the host turned you away (with the reason); the host left the lobby; the link to the host closed. | offline, waiting for players, kicked |
 

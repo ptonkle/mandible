@@ -1092,3 +1092,114 @@ fn the_whole_map_is_shown_when_the_match_ends() {
     assert_eq!(a.ui()["match"]["end"]["title"], "Victory");
     assert!(a.fog().iter().all(|b| *b == 0), "no Fog of War at the end");
 }
+
+// ---- match setup (TRIAGE rows 61, 80, 81) ----
+
+#[test]
+fn map_type_is_random_by_default_and_the_seed_picks_it() {
+    use tool_core::settings::{MapType, MatchSettings};
+    assert_eq!(MatchSettings::default().map_type, MapType::Random);
+    // Each seed resolves Random to one of the three, and all three occur.
+    let mut seen = Vec::new();
+    for seed in 0..6u64 {
+        let t = MapType::Random.resolve(seed);
+        assert_ne!(t, MapType::Random);
+        assert_eq!(t, MapType::Random.resolve(seed), "the same on every peer");
+        if !seen.contains(&t) {
+            seen.push(t);
+        }
+    }
+    assert_eq!(seen.len(), 3, "{seen:?}");
+    // A Default Match Settings saved by an older build keeps its Map Type.
+    let old = MatchSettings::parse(r#"{"map_type":"tunnels","biome":"picnic"}"#).unwrap();
+    assert_eq!(old.map_type, MapType::Tunnels);
+    // A match never plays "Random": it plays what the seed picked.
+    let mut a = app();
+    a.act("go.play_vs_ai", "", false, false);
+    a.act("pva.seed", "4", false, false);
+    a.act("pva.start", "", false, false);
+    let w = &a.game.as_ref().unwrap().world;
+    assert_eq!(w.settings.map_type, MapType::Random.resolve(4));
+}
+
+/// Play vs AI's Team cells, 0-based, from the seat table.
+fn pva_teams(a: &mut App) -> Vec<u8> {
+    let ui = a.ui();
+    let table = ui["panels"][0]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["type"] == "table")
+        .unwrap()
+        .clone();
+    table["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r[2]["value"].as_str().unwrap().parse().unwrap())
+        .collect()
+}
+
+fn pva_start_disabled(a: &mut App) -> bool {
+    let ui = a.ui();
+    let row = ui["panels"].as_array().unwrap().last().unwrap().clone();
+    row["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|b| b["id"] == "pva.start" && b["disabled"] == true)
+}
+
+#[test]
+fn play_vs_ai_teams_default_by_format_and_each_seat_picks_freely() {
+    let mut a = app();
+    a.act("go.play_vs_ai", "", false, false);
+    assert_eq!(pva_teams(&mut a), [0, 1], "1v1: Team 1 and Team 2");
+    a.act("pva.format", "two_v_two", false, false);
+    assert_eq!(pva_teams(&mut a), [0, 0, 1, 1], "2v2: 1, 1, 2, 2");
+    a.act("pva.format", "free_for_all", false, false);
+    assert_eq!(pva_teams(&mut a), [0, 1, 2, 3], "Free-for-all: 1-4");
+    // Free choice: Red with Yellow, Blue with White on Team 4.
+    a.act("pva.team.2", "0", false, false);
+    a.act("pva.team.1", "3", false, false);
+    a.act("pva.team.3", "3", false, false);
+    a.act("pva.team.3", "9", false, false);
+    assert_eq!(pva_teams(&mut a), [0, 3, 0, 3]);
+    a.act("pva.start", "", false, false);
+    let teams: Vec<u8> = a
+        .game
+        .as_ref()
+        .unwrap()
+        .world
+        .colonies
+        .iter()
+        .map(|c| c.team)
+        .collect();
+    assert_eq!(teams, [0, 3, 0, 3], "the match plays the chosen teams");
+    // A new format brings back its defaults.
+    a.act("go.main_menu", "", false, false);
+    a.act("go.play_vs_ai", "", false, false);
+    a.act("pva.format", "free_for_all", false, false);
+    a.act("pva.team.1", "0", false, false);
+    a.act("pva.format", "two_v_two", false, false);
+    assert_eq!(pva_teams(&mut a), [0, 0, 1, 1]);
+}
+
+#[test]
+fn play_vs_ai_refuses_start_while_every_colony_is_on_one_team() {
+    let mut a = app();
+    a.act("go.play_vs_ai", "", false, false);
+    assert!(!pva_start_disabled(&mut a));
+    a.act("pva.team.1", "0", false, false);
+    assert!(pva_start_disabled(&mut a), "one team: Start is refused");
+    let p = a.ui()["panels"].to_string();
+    assert!(p.contains(r#"["Teams","1"]"#), "{p}");
+    assert!(p.contains(r#"["Requires","2 Teams"]"#), "{p}");
+    a.act("pva.start", "", false, false);
+    assert_eq!(a.screen, Screen::PlayVsAi, "no match starts");
+    assert!(a.game.is_none());
+    a.act("pva.team.1", "2", false, false);
+    assert!(!pva_start_disabled(&mut a));
+    a.act("pva.start", "", false, false);
+    assert_eq!(a.screen, Screen::Match);
+}

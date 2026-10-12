@@ -21,7 +21,9 @@ Every game word is defined in [`GLOSSARY.md`](GLOSSARY.md). The design is in [`B
 | Siege | The **Siege Ant** (Tier 2, Siege Ant Hatchery) attacks structures first: 30 **Structure Damage** a hit, but only 3 Damage against ants. Every attack deals at least 1. |
 | Sandbox | **Sandbox** (Match Settings): unlimited resources and Tier 3 for human colonies, plus Pause and Time Scale. |
 | Scout | **Auto-Scout** (Colony tab): one combat ant explores by itself. **Map Revealed** (Match Settings) starts every colony with the map Explored. |
-| Online | **Host** with the Room Code empty fills in a random code (6 characters, no 1, 0, I or O) to share; **Join** with the code. Codes are not case-sensitive. |
+| Online | **Host** with the Room Code empty fills in a random code (6 characters, no 1, 0, I or O) to share with **Copy** beside it; **Join** with the code. Codes are not case-sensitive. A joined player presses **Ready Up** (Status: Ready); the host's Start waits for every one. |
+| Teams | Each seat picks **Team 1–4** freely (Play vs AI: every seat; Lobby: the host any seat, a player their own). The format sets the defaults (1v1: 1, 2; 2v2: 1, 1, 2, 2; Free-for-all: 1–4) and choosing a format brings them back. Start is refused while the played seats make one team ("Teams: 1"). |
+| Map | **Map Type** Random (the default) picks Tunnels, Open Ground or Maze from the seed; **Biome** Random likewise. |
 | Events | A **Windfall** (a cache of resources) or a **Hill** (hold it longest to win a bundle) appears every 60–90 s from 1:30. |
 | History | **Match History** (Main Menu): the last 50 matches on this device, newest first, numbered, with Result, Format, Map Type, Biome, Match Length, every colony and the end-screen summary. Kept in browser storage only; **Clear** empties it. |
 

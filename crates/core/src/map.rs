@@ -228,9 +228,14 @@ struct ChamberPlan {
 }
 
 /// Generates the map for a seed and settings.
+/// A Random Map Type becomes one of the three here, from the seed.
 pub fn generate(seed: u64, settings: &MatchSettings) -> Map {
+    let settings = &MatchSettings {
+        map_type: settings.map_type.resolve(seed),
+        ..settings.clone()
+    };
     let mut map = match settings.map_type {
-        MapType::Tunnels => generate_tunnels(seed, settings),
+        MapType::Tunnels | MapType::Random => generate_tunnels(seed, settings),
         MapType::Open | MapType::Maze => generate_open(seed, settings, true),
     };
     let _ = decorate(&mut map, seed, settings.tunnel_width, settings.map_type);
@@ -1789,7 +1794,7 @@ struct Decor {
 
 fn decor_for(map_type: MapType) -> Decor {
     match map_type {
-        MapType::Tunnels => Decor {
+        MapType::Tunnels | MapType::Random => Decor {
             bulges: 10,
             bumps: 12,
             specks: 3,
@@ -2251,6 +2256,7 @@ mod tests {
     fn settings(format: Format) -> MatchSettings {
         MatchSettings {
             format,
+            map_type: MapType::Tunnels,
             ..MatchSettings::default()
         }
     }

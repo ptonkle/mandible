@@ -283,3 +283,22 @@ table.cells select { width: 100%; }
 .field.slider input[type=range] { width: 100%; accent-color: var(--accent); }
 .slider-value { color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
 .overlay .field.slider { min-width: 18rem; }
+
+/* A select always shows its longest option whole (TRIAGE row 79: "Open
+   Ground" was cut off): its column is at least as wide as its content, and
+   the label gives way first, down to wrapping. */
+.field.select-field { grid-template-columns: minmax(0, 9.5rem) minmax(max-content, 1fr); }
+table.cells select { width: 100%; min-width: max-content; }
+
+/* The Room Code and its Copy button, in one bordered group (TRIAGE row 87). */
+.copy-group {
+  display: flex; align-items: stretch; min-width: 0;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--soil-2); overflow: hidden;
+}
+.copy-group input { flex: 1 1 auto; min-width: 0; border: none; border-radius: 0; background: transparent; }
+.copy-group .copy-code {
+  flex: 1 1 auto; padding: 0.35rem 0.5rem; font-family: ui-monospace, monospace; letter-spacing: 0.08em;
+}
+.copy-group .button.copy { border: none; border-left: 1px solid var(--line); border-radius: 0; padding: 0.35rem 0.9rem; }
+.copy-group .button.copy.active { background: var(--leaf); }
+.copy-group .button.copy:disabled { opacity: 0.5; cursor: default; }

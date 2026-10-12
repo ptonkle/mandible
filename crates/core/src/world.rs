@@ -594,7 +594,7 @@ impl World {
                 .unwrap_or(SeatKind::Ai(Difficulty::Pupa));
             w.colonies.push(Colony {
                 seat: seat as u8,
-                team: settings.format.team_of(seat),
+                team: settings.team_of(seat),
                 controller: match kind {
                     SeatKind::Human => Controller::Human,
                     SeatKind::Ai(d) => Controller::Ai(d),

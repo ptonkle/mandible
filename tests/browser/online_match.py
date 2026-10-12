@@ -11,7 +11,7 @@ For each engine (four tabs; WebKit on Linux two, see online.LOOPBACK_ONLY):
   A connects it; every tab reaches the Lobby, and the host's Lobby lists
   every Player Name; the Lobby fits 1280 x 720 with no scroll bar;
 - Start stays disabled until every joiner has pressed Ready Up, and the host
-  sees each one Readied;
+  sees each one Ready;
 - the last joiner leaves (Status: Not Connected, its seat Open again) and
   joins again with a new Invite Code (Status: In Lobby);
 - A starts the match; every tab sees the HUD and the clocks advance together
@@ -19,7 +19,7 @@ For each engine (four tabs; WebKit on Linux two, see online.LOOPBACK_ONLY):
   drops by 50: worked out by hand);
 - every joiner concedes: A sees Victory with a Rematch button, the others
   Defeat without one;
-- A presses Rematch: every tab is back in the Lobby with nobody Readied;
+- A presses Rematch: every tab is back in the Lobby with nobody Ready;
   after Ready Up, A starts again and every tab is in the new match.
 
     python3 tests/browser/online_match.py
@@ -31,6 +31,7 @@ from playwright.sync_api import sync_playwright
 
 sys.path.insert(0, os.path.dirname(__file__))
 import online as T  # noqa: E402  the transport check's helpers
+from interactions import SELECTS_CUT  # noqa: E402  whole options in every select
 
 STRINGS = __import__("json").loads((T.ROOT / "data" / "strings.json").read_text())
 NAMES = ["Ann", "Bo", "Cy", "Di"]
@@ -142,18 +143,83 @@ def in_match(name, page):
         return False
 
 
+def ready_count(page):
+    """Seats whose Status cell reads Ready, matched whole ("Ready Up" holds
+    the same word)."""
+    return page.evaluate(
+        "t => [...document.querySelectorAll('table.cells td')].filter(td => td.textContent === t).length",
+        STRINGS["online.readied"],
+    )
+
+
 def ready_all(host, joiners):
     for page in joiners:
         page.click("#lobby\\.ready")
     try:
         host.wait_for_function(
-            "([t, n]) => document.body.innerText.split(t).length - 1 >= n",
+            "([t, n]) => [...document.querySelectorAll('table.cells td')].filter(td => td.textContent === t).length >= n",
             arg=[STRINGS["online.readied"], len(joiners)],
             timeout=T.WAIT_MS,
         )
         return True
     except Exception:
         return False
+
+
+def wait_notice(page, shown):
+    """True once the "Teams: 1" notice is (or is not) shown."""
+    try:
+        page.wait_for_function(
+            "want => !!document.getElementById('teams.notice') === want",
+            arg=shown,
+            timeout=T.WAIT_MS,
+        )
+        return True
+    except Exception:
+        return False
+
+
+def check_teams(a, joiners, count):
+    """TRIAGE rows 80 and 81: each seat's team is chosen freely (the host any
+    seat, a joiner its own); with every played seat on one team Start is
+    refused and "Teams: 1" shows."""
+    want = ["0", "1", "2", "3"][:count]
+    teams = [a.input_value(f"#lobby\\.team\\.{i}") for i in range(count)]
+    T.check(teams == want, f"each seat starts on its format's team {teams}")
+    b = joiners[0]
+    T.check(
+        b.locator("#lobby\\.team\\.1").count() == 1 and b.locator("#lobby\\.team\\.0").count() == 0,
+        "a joiner picks its own team only",
+    )
+    for i in range(1, count):
+        a.select_option(f"#lobby\\.team\\.{i}", "0")
+    T.check(wait_notice(a, True), "every seat on Team 1: Teams: 1 shows")
+    T.check(start_disabled(a), "every seat on Team 1: Start is refused")
+    # The joiner moves itself to Team 2: two teams again.
+    b.select_option("#lobby\\.team\\.1", "1")
+    T.check(wait_notice(a, False), "a joiner's own team request reaches the host")
+    try:
+        a.wait_for_function(
+            "() => document.getElementById('lobby.team.1').value === '1'", timeout=T.WAIT_MS
+        )
+        T.check(True, "the host sees the joiner on Team 2")
+    except Exception:
+        T.check(False, "the host sees the joiner on Team 2")
+    # Back to one team per seat for the match below (each human concedes in
+    # turn, and the host must be the last team standing).
+    for i in range(2, count):
+        a.select_option(f"#lobby\\.team\\.{i}", str(i))
+    try:
+        a.wait_for_function(
+            "n => [...Array(n).keys()].every(i => document.getElementById('lobby.team.' + i).value === String(i))",
+            arg=count,
+            timeout=T.WAIT_MS,
+        )
+        T.check(True, "the host sets any seat's team")
+    except Exception:
+        T.check(False, "the host sets any seat's team")
+    T.check(ready_count(a) == 0, "a team change clears Ready Up")
+    T.check(ready_all(a, joiners), f"the host sees {len(joiners)} Ready again")
 
 
 def run_engine(p, engine, origin):
@@ -184,12 +250,20 @@ def run_engine(p, engine, origin):
     seated = wait_status(joiners[0], STRINGS["online.in_lobby"])
     T.check(seated, f"a joiner's Status [{status_of(joiners[0])!r}]")
     T.check(start_disabled(a), "Start waits for Ready Up")
-    T.check(ready_all(a, joiners), f"the host sees {len(joiners)} Readied")
+    T.check(ready_all(a, joiners), f"the host sees {len(joiners)} Ready")
     try:
         a.wait_for_function("() => !document.getElementById('lobby.start').disabled", timeout=T.WAIT_MS)
-        T.check(True, "Start is enabled once every joiner is Readied")
+        T.check(True, "Start is enabled once every joiner is Ready")
     except Exception:
-        T.check(False, "Start is enabled once every joiner is Readied")
+        T.check(False, "Start is enabled once every joiner is Ready")
+    cut = a.evaluate(SELECTS_CUT) + joiners[0].evaluate(SELECTS_CUT)
+    T.check(cut == [], f"every Lobby select shows its longest option {cut}")
+    check_teams(a, joiners, count)
+    try:
+        a.wait_for_function("() => !document.getElementById('lobby.start').disabled", timeout=T.WAIT_MS)
+        T.check(True, "Start is enabled again with two teams")
+    except Exception:
+        T.check(False, "Start is enabled again with two teams")
 
     # Leave and join again (TRIAGE row 43).
     last = joiners[-1]
@@ -239,7 +313,7 @@ def run_engine(p, engine, origin):
     T.check(a.locator("#end\\.rematch").count() == 1, "the host has Rematch")
     T.check(b.locator("#end\\.rematch").count() == 0, "a joiner has no Rematch")
 
-    # Rematch (TRIAGE row 40): everyone back to the same Lobby, nobody Readied.
+    # Rematch (TRIAGE row 40): everyone back to the same Lobby, nobody Ready.
     a.click("#end\\.rematch")
     for i, page in enumerate(tabs):
         try:
@@ -247,9 +321,9 @@ def run_engine(p, engine, origin):
             T.check(True, f"{NAMES[i]} is back in the Lobby")
         except Exception:
             T.check(False, f"{NAMES[i]} is back in the Lobby")
-    T.check(STRINGS["online.readied"] not in a.inner_text("#panels"), "Rematch clears Ready Up")
+    T.check(ready_count(a) == 0, "Rematch clears Ready Up")
     T.check(start_disabled(a), "Start waits for Ready Up again")
-    T.check(ready_all(a, joiners), "every joiner is Readied again")
+    T.check(ready_all(a, joiners), "every joiner is Ready again")
     try:
         a.wait_for_function("() => !document.getElementById('lobby.start').disabled", timeout=T.WAIT_MS)
     except Exception:
