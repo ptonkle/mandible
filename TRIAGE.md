@@ -66,3 +66,29 @@ One row per concrete change. Say what you did, what you expected, and what happe
 | 58 | Played on Picnic | More little props on the blanket: picnic basket, cookies, and more | — | (see Expected) | done 2026-10-11 |
 | 59 | Played | Sounds, starting with a warning when training past the room in housing | No sound at all | *Done (foundation): `crates/core/src/sound.rs` synthesises each sound (integer synthesiser to a WAV file, made by the core); the page decodes and plays it with Web Audio, and holds no numbers. Sounds: Warning (two low beeps: training with no housing room, and every refusal notice such as Not Enough, Pop Cap or Placement Blocked), Complete (upgrade or Evolve finished), Alert (Queen Lost), Event (Windfall, Hill), Victory, Defeat, Click (Volume changed). Each has a cooldown (Warning 1.5 s). Volume (Off, Low, Normal, High) in Player Settings. Tests: every cue is a valid WAV, audible, never clips, silent at Off; training past housing plays the Warning once (break-once: no cue → `left: Null right: ["warning"]`); a browser check plays it in all three engines. Ideas for later: an Alert when our ants or structures come under attack, softer UI clicks, ambient sound per biome.* | done 2026-10-11 |
 | 60 | — | A volume slider that is easy to reach | Volume was a 4-step choice in Player Settings only | *Done: Volume is a 0–100% slider (steps of 5) in Player Settings and in the in-match Menu (Esc); its value is sent when released and plays a click at the new level; old 4-step settings convert (Low 35%, Normal 70%, High 100%). Tests: the slider in both places and the conversion (core); the slider in the Menu (browser, three engines).* | done 2026-10-11 |
+| 61 | Opened Match Settings | Map Type Random (and a random map) by default | A fixed Map Type | (see Expected) | open |
+| 62 | Watched gathering | A node's Saturation counts only ants gathering from it (or walking to it), not ants that left it | The number drops while an ant is not gathering | (see Expected) | open |
+| 63 | Picked species | Siege Ants: bonus damage against structures; no Leafcutter Ant | Leafcutter Ant | (see Expected) | open |
+| 64 | Finished an Evolve | A sound of its own | The same Complete sound as upgrades | (see Expected) | open |
+| 65 | Looked at the browser tab | A tab icon | None | (see Expected) | open |
+| 66 | Opened the GitHub page | A tile grid of screenshots of big ant battles | Text only | (see Expected) | open |
+| 67 | Gathered with Balanced | Fewer Leaves | Too many Leaves | (see Expected) | open |
+| 68 | Built brood cells | Brood cells see farther | Short sight | (see Expected) | open |
+| 69 | Bought Gather Rate | Costs more, gives more; not a no-brainer | Too cheap for its bonus | (see Expected) | open |
+| 70 | Looked at Build Rate | A Training Rate upgrade (Build Rate is only for structures) | — | (see Expected) | open |
+| 71 | Built brood cells | Half the housing (15 → 8) | 15 each | (see Expected) | open |
+| 72 | Placement refused | No sound; the blueprint stays on the cursor to try elsewhere | A Warning, and placement ends | (see Expected) | open |
+| 73 | Placed in build mode | A ring around each queen showing where building is allowed | — | (see Expected) | open |
+| 74 | Played 2v2 | No lag | Lag | (see Expected) | open |
+| 75 | Heard sounds | Quieter overall; no sound when a queen dies | Too loud; Alert on Queen Lost | (see Expected) | open |
+| 76 | Last human conceded | An option to end the match fully | — | (see Expected) | open |
+| 77 | Match ended | The whole map is shown | Fog stays | (see Expected) | open |
+| 78 | Read the end graphs | Players and AIs gather similar Leaves; fewer Leaves overall (costs higher, rate lower or lower priority) | Far more Leaves than the AIs; too many | (see Expected) | open |
+| 79 | Opened Match Settings | The Map Type selector shows the whole "Open Ground" | Cut off | (see Expected) | open |
+| 80 | Set up a match | Free choice of Team 1–4 per player, defaulting by format | Teams assumed from format | (see Expected) | open |
+| 81 | Started a match | Never every colony on one team | A match started with everyone on one team | (see Expected) | open |
+| 82 | Evolved | Evolve is a bigger investment | Too cheap | (see Expected) | open |
+| 83 | Started a match | Enough Carpenter Ants to carry a queen's cost in one trip | Several trips | (see Expected) | open |
+| 84 | Only AIs left in a match | A way out besides reloading | None | (see Expected) | open |
+| 85 | Watched ants | Less overlap between ants | Ants overlap too much | (see Expected) | open |
+| 86 | Fought | Every attack does at least 1 damage | Some attacks do 0 | (see Expected) | open |
