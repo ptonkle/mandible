@@ -140,6 +140,47 @@ fn saturation_caps_gatherers_per_node() {
     );
 }
 
+/// Gatherers per node, as Saturation counts them (`Ant::node`).
+fn saturation(w: &World) -> std::collections::BTreeMap<u32, i32> {
+    let mut per = std::collections::BTreeMap::new();
+    for a in &w.ants {
+        if let Some(n) = a.node() {
+            *per.entry(n).or_insert(0) += 1;
+        }
+    }
+    per
+}
+
+#[test]
+fn saturation_holds_through_the_whole_gather_cycle() {
+    // TRIAGE row 62: a gatherer counts at its node while it walks there,
+    // gathers, and carries back to the queen; the number never drops in
+    // the normal cycle, and the idle ants never take a carrier's place.
+    let mut w = arena(3);
+    let h = home(&w, 0);
+    for _ in 0..40 {
+        w.spawn_ant(0, Species::Harvester, h);
+    }
+    w.colonies[0].focus = Focus::Food;
+    run(&mut w, 1);
+    let first = saturation(&w);
+    assert_eq!(first.values().sum::<i32>(), 32, "{first:?}");
+    let mut carrying_seen = 0;
+    for t in 0..ticks(60) {
+        run(&mut w, 1);
+        assert_eq!(saturation(&w), first, "tick {t}");
+        carrying_seen += w
+            .ants
+            .iter()
+            .filter(|a| matches!(a.job, Job::Deliver(Some(_))))
+            .count();
+    }
+    let gathered: i32 = w.colonies[0].tally.gathered.iter().sum();
+    // Several full trips were made, and carriers were counted on the way.
+    assert!(gathered >= 32 * 10, "gathered {gathered}");
+    assert!(carrying_seen > 0);
+}
+
 #[test]
 fn gather_focus_changes_the_split() {
     let count = |focus: Focus| {
@@ -706,6 +747,80 @@ fn digging_opens_dirt() {
 }
 
 #[test]
+fn repaired_flow_fields_steer_like_fresh_ones_while_ants_dig() {
+    // Digging repairs the cached flow fields instead of rebuilding them. A
+    // world restored from a snapshot (as a lockstep peer resyncs) builds
+    // its fields fresh, so both must step identically.
+    let mut w = (23..60)
+        .map(arena)
+        .find(|w| {
+            w.map
+                .ground
+                .iter()
+                .filter(|g| **g == tool_core::map::Ground::Dirt)
+                .count()
+                > 40
+        })
+        .expect("some seed has dirt");
+    let width = w.map.w;
+    let mut diggers = 0;
+    for (i, g) in w.map.ground.clone().iter().enumerate() {
+        if *g != tool_core::map::Ground::Dirt || diggers >= 12 {
+            continue;
+        }
+        let (x, y) = (i as i32 % width, i as i32 / width);
+        let beside = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+            .into_iter()
+            .map(|(dx, dy)| (x + dx, y + dy))
+            .find(|(a, b)| w.map.is_floor(*a, *b));
+        if let Some((bx, by)) = beside {
+            let id = put(&mut w, 0, Species::Soldier, Pos::of_cell(bx, by));
+            let a = w.ants.iter_mut().find(|a| a.id == id).unwrap();
+            a.target = Some(tool_core::world::Target::Dirt(x, y));
+            diggers += 1;
+        }
+    }
+    assert!(diggers >= 6, "{diggers} diggers");
+    // Marchers whose fields cross the map while the dirt opens.
+    let (h0, h) = (home(&w, 0), home(&w, 1));
+    for k in 0..30 {
+        put(&mut w, 0, Species::Fire, near(h0, k % 3 - 1, 3));
+        put(&mut w, 1, Species::Turtle, near(h, k % 3 - 1, 3));
+    }
+    for (seat, to) in [(0u8, home(&w, 1)), (1u8, home(&w, 0))] {
+        let (x, y) = to.cell();
+        w.apply(
+            seat,
+            &Command::SetWaypoint {
+                species: None,
+                x,
+                y,
+                add: false,
+            },
+        );
+    }
+    let dirt = |w: &World| {
+        w.map
+            .ground
+            .iter()
+            .filter(|g| **g == tool_core::map::Ground::Dirt)
+            .count()
+    };
+    let before = dirt(&w);
+    for t in 0..ticks(1200) {
+        if t % 10 == 0 {
+            let mut fresh = World::restore(&w.snapshot()).expect("restores");
+            w.step(&[], &[]);
+            fresh.step(&[], &[]);
+            assert_eq!(w.checksum(), fresh.checksum(), "diverged at tick {t}");
+        } else {
+            w.step(&[], &[]);
+        }
+    }
+    assert!(dirt(&w) < before, "dirt was dug ({before} cells before)");
+}
+
+#[test]
 fn hill_holder_is_paid() {
     let mut w = arena(24);
     w.settings.events = true;
@@ -1234,6 +1349,53 @@ fn farthest(w: &World, ids: &[u32], from: Pos) -> i32 {
         .map(|a| a.pos.dist(from) / CELL)
         .max()
         .unwrap_or(0)
+}
+
+/// Pairs of walking ants (same layer) whose bodies overlap by more than
+/// `pct` percent of the sum of their radii, and the number of ants.
+fn overlaps(w: &World, pct: i32) -> (usize, usize) {
+    let live: Vec<_> = w.ants.iter().filter(|a| !a.species.flies()).collect();
+    let mut n = 0;
+    for (i, a) in live.iter().enumerate() {
+        for b in &live[i + 1..] {
+            let sum = a.species.stats().radius + b.species.stats().radius;
+            if a.pos.dist(b.pos) * 100 < sum * (100 - pct) {
+                n += 1;
+            }
+        }
+    }
+    (n, live.len())
+}
+
+#[test]
+fn a_crowd_at_a_waypoint_spreads_out() {
+    // TRIAGE row 85: ants overlapped too much. A crowd that walked to a
+    // waypoint and stopped there keeps its bodies nearly apart: no pair of
+    // combat ants overlaps by more than a quarter of their radii.
+    let mut w = arena(21);
+    let h = home(&w, 0);
+    for k in 0..90 {
+        let sp = [Species::Soldier, Species::Soldier, Species::Turtle][k % 3];
+        put(&mut w, 0, sp, near(h, k as i32 % 3 - 1, 4 + k as i32 / 30));
+    }
+    let c = w.map.chambers[w.map.centre].clone();
+    let cmd = Command::SetWaypoint {
+        species: None,
+        x: c.cx,
+        y: c.cy,
+        add: false,
+    };
+    w.apply(0, &cmd);
+    run(&mut w, ticks(600));
+    let (deep, n) = overlaps(&w, 25);
+    assert_eq!(n, 90);
+    let arrived = w
+        .ants
+        .iter()
+        .filter(|a| a.pos.dist(Pos::of_cell(c.cx, c.cy)) < 12 * CELL)
+        .count();
+    assert_eq!(arrived, 90, "every ant reached the waypoint");
+    assert_eq!(deep, 0, "{deep} pairs overlap by more than 25%");
 }
 
 #[test]

@@ -1203,3 +1203,60 @@ fn play_vs_ai_refuses_start_while_every_colony_is_on_one_team() {
     a.act("pva.start", "", false, false);
     assert_eq!(a.screen, Screen::Match);
 }
+
+#[test]
+fn dug_dirt_repaints_only_a_patch_that_matches_the_whole_image() {
+    // SECOND-ORDER row 45 (TRIAGE row 74): the whole terrain image used to
+    // be painted again for every dug cell. Now only the area round it is,
+    // and the patched image equals a fresh whole one.
+    use tool_core::map::Ground;
+    use tool_core::render::{terrain_image, TERRAIN_SCALE};
+    let has_dirt = |a: &App| {
+        let g = &a.game.as_ref().unwrap().world.map.ground;
+        g.iter().filter(|c| **c == Ground::Dirt).count() > 2
+    };
+    let mut a = app();
+    for seed in 1.. {
+        a.act("go.play_vs_ai", "", false, false);
+        a.act("pva.seed", &seed.to_string(), false, false);
+        a.act("pva.start", "", false, false);
+        if has_dirt(&a) {
+            break;
+        }
+        a.game = None;
+        a.screen = Screen::MainMenu;
+    }
+    let stamp = a.terrain_stamp();
+    let mut image = a.terrain();
+    assert_ne!(a.terrain_stamp(), stamp, "the stamp changes once painted");
+    let stamp = a.terrain_stamp();
+    assert!(a.terrain_patch().is_empty(), "nothing dug yet");
+    let world = &mut a.game.as_mut().unwrap().world;
+    let (w, h) = (world.map.w, world.map.h);
+    // Two dug cells, a little apart, one at the map's edge if dirt is there.
+    let dirt: Vec<usize> = (0..world.map.ground.len())
+        .filter(|&i| world.map.ground[i] == Ground::Dirt)
+        .collect();
+    assert!(dirt.len() > 2, "this map has dirt");
+    for &i in [dirt[0], dirt[dirt.len() / 2]].iter() {
+        world.map.ground[i] = Ground::Floor;
+    }
+    let rect = a.terrain_patch();
+    let [x, y, pw, ph] = rect[..] else {
+        panic!("a patch: {rect:?}");
+    };
+    let pixels = a.terrain_patch_pixels();
+    assert_eq!(pixels.len(), (pw * ph * 4) as usize);
+    assert!(pw * ph < w * h * TERRAIN_SCALE * TERRAIN_SCALE, "only part");
+    let iw = w * TERRAIN_SCALE;
+    for row in 0..ph {
+        let to = (((y + row) * iw + x) * 4) as usize;
+        let from = (row * pw * 4) as usize;
+        let n = (pw * 4) as usize;
+        image[to..to + n].copy_from_slice(&pixels[from..from + n]);
+    }
+    let fresh = terrain_image(&a.game.as_ref().unwrap().world, TERRAIN_SCALE).2;
+    assert!(image == fresh, "the patched image equals a fresh one");
+    assert_eq!(a.terrain_stamp(), stamp, "no whole repaint for a dig");
+    assert!(a.terrain_patch().is_empty(), "painted once");
+}

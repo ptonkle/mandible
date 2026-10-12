@@ -4,6 +4,7 @@
 //
 //   const renderer = createRenderer(canvas, assets);
 //   renderer.setImage(assets.images.terrain, width, height, rgbaBytes);
+//   renderer.patchImage(assets.images.terrain, [x, y, width, height], rgbaBytes);
 //   renderer.draw(drawList);   // an Int32Array from the core, every frame
 
 function toPath(polygons) {
@@ -142,6 +143,15 @@ export function createRenderer(canvas, assets) {
     image.getContext("2d").putImageData(data, 0, 0);
   }
 
+  // Paints RGBA bytes from the core over part of an image already set.
+  function patchImage(id, rect, bytes) {
+    const image = images[id];
+    const [x, y, width, height] = rect;
+    if (!image) return;
+    const pixels = new Uint8ClampedArray(bytes.buffer, bytes.byteOffset, bytes.length);
+    image.getContext("2d").putImageData(new ImageData(pixels, width, height), x, y);
+  }
+
   function draw(drawList) {
     list = drawList;
     at = 0;
@@ -156,5 +166,5 @@ export function createRenderer(canvas, assets) {
     }
   }
 
-  return { setImage, draw };
+  return { setImage, patchImage, draw };
 }

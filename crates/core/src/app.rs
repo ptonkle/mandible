@@ -200,6 +200,10 @@ pub struct Game {
     pub stopped: bool,
     /// Keep Watching was chosen after the last human was defeated.
     pub keep_watching: bool,
+    /// The ground as the page's terrain image shows it (empty until the
+    /// whole image is painted), and the pixels of the last patch.
+    pub painted: Vec<crate::map::Ground>,
+    pub patch: Vec<u8>,
 }
 
 impl Game {
@@ -237,6 +241,8 @@ impl Game {
             local_notices: Vec::new(),
             stopped: false,
             keep_watching: false,
+            painted: Vec::new(),
+            patch: Vec::new(),
         }
     }
 
@@ -2921,12 +2927,61 @@ impl App {
         json!({"size": ICON_PX, "lists": lists})
     }
 
-    /// Changes when the terrain image must be painted again: a new match,
-    /// or dirt dug away.
+    /// Changes when the whole terrain image must be painted: a new match
+    /// (until `terrain` is called). Dug dirt is painted by `terrain_patch`.
     pub fn terrain_stamp(&self) -> u32 {
         match &self.game {
-            Some(g) => render::terrain_stamp(&g.world) ^ (g.world.seed as u32).rotate_left(16),
+            Some(g) => {
+                let unpainted = g.painted.len() != g.world.map.ground.len();
+                (g.world.seed as u32).rotate_left(16) ^ unpainted as u32
+            }
             None => 0,
+        }
+    }
+
+    /// The part of the terrain image that changed since it was last
+    /// painted (dirt dug away), as [x, y, width, height] in image pixels,
+    /// or empty; its RGBA bytes follow from `terrain_patch_pixels`. The
+    /// patch reaches `render::TERRAIN_REACH` cells past the changed cells,
+    /// as far as one cell's change shows in the image.
+    pub fn terrain_patch(&mut self) -> Vec<i32> {
+        let Some(g) = &mut self.game else {
+            return Vec::new();
+        };
+        let ground = &g.world.map.ground;
+        if g.painted.len() != ground.len() {
+            return Vec::new();
+        }
+        let w = g.world.map.w;
+        let mut bounds: Option<(i32, i32, i32, i32)> = None;
+        for (i, (now, was)) in ground.iter().zip(&g.painted).enumerate() {
+            if now != was {
+                let (x, y) = (i as i32 % w, i as i32 / w);
+                let b = bounds.get_or_insert((x, y, x, y));
+                *b = (b.0.min(x), b.1.min(y), b.2.max(x), b.3.max(y));
+            }
+        }
+        let Some((x0, y0, x1, y1)) = bounds else {
+            return Vec::new();
+        };
+        let reach = render::TERRAIN_REACH;
+        let (x0, y0) = ((x0 - reach).max(0), (y0 - reach).max(0));
+        let (x1, y1) = (
+            (x1 + 1 + reach).min(g.world.map.w),
+            (y1 + 1 + reach).min(g.world.map.h),
+        );
+        let scale = render::TERRAIN_SCALE;
+        let (pw, ph, pixels) = render::terrain_region(&g.world, scale, x0, y0, x1, y1);
+        g.painted.clone_from(ground);
+        g.patch = pixels;
+        vec![x0 * scale, y0 * scale, pw, ph]
+    }
+
+    /// The RGBA bytes of the patch `terrain_patch` last returned.
+    pub fn terrain_patch_pixels(&mut self) -> Vec<u8> {
+        match &mut self.game {
+            Some(g) => std::mem::take(&mut g.patch),
+            None => Vec::new(),
         }
     }
 
@@ -2941,10 +2996,15 @@ impl App {
         }
     }
 
-    /// The terrain image's RGBA bytes.
-    pub fn terrain(&self) -> Vec<u8> {
-        match &self.game {
-            Some(g) => render::terrain_image(&g.world, render::TERRAIN_SCALE).2,
+    /// The whole terrain image's RGBA bytes; later changes come as patches
+    /// (`terrain_patch`).
+    pub fn terrain(&mut self) -> Vec<u8> {
+        match &mut self.game {
+            Some(g) => {
+                g.painted.clone_from(&g.world.map.ground);
+                g.patch.clear();
+                render::terrain_image(&g.world, render::TERRAIN_SCALE).2
+            }
             None => Vec::new(),
         }
     }

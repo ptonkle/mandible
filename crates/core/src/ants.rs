@@ -26,12 +26,18 @@ pub struct Buckets {
 const BUCKET: i32 = 4 * CELL;
 
 impl Buckets {
+    /// Refills the buckets, keeping their storage from tick to tick.
     fn rebuild(&mut self, w: &World) {
         self.cols = w.map.w * CELL / BUCKET + 1;
         self.rows = w.map.h * CELL / BUCKET + 1;
         let n = (self.cols * self.rows) as usize;
-        self.ants = vec![Vec::new(); n];
-        self.structures = vec![Vec::new(); n];
+        for v in [&mut self.ants, &mut self.structures] {
+            v.resize_with(n, Vec::new);
+            v.truncate(n);
+            for b in v.iter_mut() {
+                b.clear();
+            }
+        }
         for (i, a) in w.ants.iter().enumerate() {
             let b = self.slot(a.pos);
             self.ants[b].push(i as u32);
@@ -48,19 +54,14 @@ impl Buckets {
         (by * self.cols + bx) as usize
     }
 
-    /// Bucket indices covering a square around `p`.
-    fn around(&self, p: Pos, r: i32) -> Vec<usize> {
+    /// Bucket indices covering a square around `p`, row by row.
+    fn around(&self, p: Pos, r: i32) -> impl Iterator<Item = usize> {
         let x0 = ((p.x - r) / BUCKET).clamp(0, self.cols - 1);
         let x1 = ((p.x + r) / BUCKET).clamp(0, self.cols - 1);
         let y0 = ((p.y - r) / BUCKET).clamp(0, self.rows - 1);
         let y1 = ((p.y + r) / BUCKET).clamp(0, self.rows - 1);
-        let mut v = Vec::new();
-        for by in y0..=y1 {
-            for bx in x0..=x1 {
-                v.push((by * self.cols + bx) as usize);
-            }
-        }
-        v
+        let cols = self.cols;
+        (y0..=y1).flat_map(move |by| (x0..=x1).map(move |bx| (by * cols + bx) as usize))
     }
 }
 
@@ -92,19 +93,25 @@ impl World {
         let mut bp_load: BTreeMap<Id, usize> = BTreeMap::new();
         let mut res_load: Vec<[i32; 3]> = vec![[0; 3]; self.colonies.len()];
         for a in &self.ants {
-            match a.job {
-                Job::Gather(n) => {
-                    *node_load.entry(n).or_insert(0) += 1;
-                    if let Some(ni) = self.node_index(n) {
-                        res_load[a.colony as usize][self.nodes[ni].resource.index()] += 1;
-                    }
+            if let Some(n) = a.node() {
+                *node_load.entry(n).or_insert(0) += 1;
+                if let Some(ni) = self.node_index(n) {
+                    res_load[a.colony as usize][self.nodes[ni].resource.index()] += 1;
                 }
-                Job::Fetch(b) | Job::Haul(b) | Job::Build(b) => *bp_load.entry(b).or_insert(0) += 1,
-                _ => {}
+            }
+            if let Job::Fetch(b) | Job::Haul(b) | Job::Build(b) = a.job {
+                *bp_load.entry(b).or_insert(0) += 1;
             }
         }
         // Waypoint assignment: each species' ants split evenly, by id order.
         let mut ordinal: BTreeMap<(u8, usize), usize> = BTreeMap::new();
+        // Each colony's ants of each species, for the waypoint goal size.
+        let mut counts = vec![[0usize; Species::ALL.len()]; self.colonies.len()];
+        for a in &self.ants {
+            if let Some(c) = counts.get_mut(a.colony as usize) {
+                c[a.species.index()] += 1;
+            }
+        }
         // Idle Carpenter Ants so far this tick, per colony, for spreading
         // them round the queens.
         let mut idle_builders: BTreeMap<u8, usize> = BTreeMap::new();
@@ -125,7 +132,8 @@ impl World {
                     let n = ordinal.entry(k).or_insert(0);
                     let my = *n;
                     *n += 1;
-                    self.fighter(&mut a, my);
+                    let all = counts[a.colony as usize][a.species.index()];
+                    self.fighter(&mut a, my, all);
                 }
             }
             if let Some(h) = heading16(a.pos.x - a.prev.x, a.pos.y - a.prev.y) {
@@ -309,31 +317,43 @@ impl World {
         res_load: &mut [[i32; 3]],
     ) {
         let st = self.colonies[a.colony as usize].ranks.apply(a.species);
-        if a.carried() >= st.carry {
-            a.job = Job::Deliver;
+        if a.carried() >= st.carry && !matches!(a.job, Job::Deliver(_)) {
+            a.job = Job::Deliver(a.node());
         }
-        if a.job == Job::Deliver {
+        if let Job::Deliver(from) = a.job {
             let Some((key, qpos, qr)) = self.queen_key(a) else {
                 return;
             };
             let step = self.follow(a, key);
-            if matches!(step, Step::Arrived) || a.pos.dist(qpos) <= qr + st.radius + CELL {
-                let ci = a.colony as usize;
-                let slot = self.tick as usize % INCOME_TICKS;
-                for r in 0..3 {
-                    self.colonies[ci].stock[r] += a.inventory[r];
-                    self.colonies[ci].income_ring[slot][r] += a.inventory[r];
-                    self.colonies[ci].tally.gathered[r] += a.inventory[r];
-                }
-                a.inventory = [0; 3];
-                a.job = Job::Idle;
+            if !(matches!(step, Step::Arrived) || a.pos.dist(qpos) <= qr + st.radius + CELL) {
+                return;
             }
-            return;
+            let ci = a.colony as usize;
+            let slot = self.tick as usize % INCOME_TICKS;
+            for r in 0..3 {
+                self.colonies[ci].stock[r] += a.inventory[r];
+                self.colonies[ci].income_ring[slot][r] += a.inventory[r];
+                self.colonies[ci].tally.gathered[r] += a.inventory[r];
+            }
+            a.inventory = [0; 3];
+            a.job = Job::Idle;
+            // Free its place at the node and choose again now, in the same
+            // tick: nearest first, so it goes back to the same node unless
+            // Gather Focus wants it elsewhere. Saturation never dips.
+            if let Some(n) = from {
+                if let Some(c) = node_load.get_mut(&n) {
+                    *c = c.saturating_sub(1);
+                }
+                if let Some(ni) = self.node_index(n) {
+                    let r = &mut res_load[ci][self.nodes[ni].resource.index()];
+                    *r = (*r - 1).max(0);
+                }
+            }
         }
         if let Job::Gather(nid) = a.job {
             let Some(ni) = self.node_index(nid) else {
                 a.job = if a.carried() > 0 {
-                    Job::Deliver
+                    Job::Deliver(None)
                 } else {
                     Job::Idle
                 };
@@ -341,7 +361,7 @@ impl World {
             };
             if self.nodes[ni].amount <= 0 {
                 a.job = if a.carried() > 0 {
-                    Job::Deliver
+                    Job::Deliver(None)
                 } else {
                     Job::Idle
                 };
@@ -374,7 +394,8 @@ impl World {
                     a.inventory[res] += 1;
                 }
                 if a.carried() >= st.carry || self.nodes[ni].amount <= 0 {
-                    a.job = Job::Deliver;
+                    let more = self.nodes[ni].amount > 0;
+                    a.job = Job::Deliver(more.then_some(nid));
                     a.gather_acc = 0;
                 }
             }
@@ -388,7 +409,7 @@ impl World {
             }
             a.job = Job::Gather(nid);
         } else if a.carried() > 0 {
-            a.job = Job::Deliver;
+            a.job = Job::Deliver(None);
         } else if let Some((key, _, _)) = self.queen_key(a) {
             self.follow(a, key);
         }
@@ -756,7 +777,8 @@ impl World {
             .all(|(x, y)| self.map.is_floor(x, y) && self.wall[self.map.idx(x, y)] == NO_WALL)
     }
 
-    fn fighter(&mut self, a: &mut Ant, ordinal: usize) {
+    /// `same` counts the colony's ants of this species.
+    fn fighter(&mut self, a: &mut Ant, ordinal: usize, same: usize) {
         let ci = a.colony as usize;
         let st = self.colonies[ci].ranks.apply(a.species);
         let aggro = st.vision * CELL;
@@ -863,13 +885,7 @@ impl World {
         let wps = &self.colonies[ci].waypoints[a.species.index()];
         let step = if !wps.is_empty() {
             let wp = wps[ordinal % wps.len()];
-            let share = (self
-                .ants
-                .iter()
-                .filter(|o| o.colony == a.colony && o.species == a.species)
-                .count()
-                / wps.len())
-            .max(1);
+            let share = (same / wps.len()).max(1);
             let r = 2 + (isqrt(share as u64 / 2) as i32 / 2) * 2;
             let (x, y) = wp.cell();
             let key = World::key_for(a, x, y, r);
@@ -1179,60 +1195,110 @@ impl World {
         if self.dirt[i] <= 0 {
             self.dirt[i] = 0;
             self.map.ground[i] = Ground::Floor;
-            self.nav.invalidate();
+            self.terrain_opened(&[(x, y)]);
         }
     }
 
-    /// Ants push apart when they overlap more than 30% of a body width.
+    /// Cells became easier to cross (dug, or a wall fell): the cached flow
+    /// fields are repaired round them instead of all rebuilt.
+    fn terrain_opened(&mut self, cells: &[(i32, i32)]) {
+        let teams = self.team_table();
+        let t = Terrain {
+            w: self.map.w,
+            h: self.map.h,
+            ground: &self.map.ground,
+            wall: &self.wall,
+            teams: &teams,
+        };
+        self.nav.opened(&t, cells);
+    }
+
+    /// Ants push apart (TRIAGE row 85): a combat ant keeps its whole body
+    /// clear of every other ant on its layer (ground or air); two workers
+    /// may overlap by 30%, so a node's gatherers still fit round it. Each
+    /// of a pair moves half the overlap; if one cannot move (rock, dirt, an
+    /// enemy wall), the other moves all of it, sliding along the obstacle.
     fn separate(&mut self) {
         let mut grid = std::mem::take(&mut self.grid);
         grid.rebuild(self);
+        // Per ant, once: body radius (0 for the dead), layer, workers.
+        let body: Vec<(i32, bool, bool)> = self
+            .ants
+            .iter()
+            .map(|a| {
+                let st = a.species.stats();
+                let r = if a.health > 0 { st.radius } else { 0 };
+                (r, a.species.flies(), a.species.is_worker())
+            })
+            .collect();
+        let reach = body.iter().map(|b| b.0).max().unwrap_or(0);
         let n = self.ants.len();
         for i in 0..n {
-            let a = self.ants[i];
-            if a.health <= 0 {
+            let (ra, fa, wa) = body[i];
+            if ra == 0 {
                 continue;
             }
-            let ra = a.species.stats().radius;
-            for b in grid.around(a.pos, ra * 3) {
+            let p = self.ants[i].pos;
+            for b in grid.around(p, ra + reach) {
                 for &j in &grid.ants[b] {
                     let j = j as usize;
                     if j <= i {
                         continue;
                     }
-                    let o = self.ants[j];
-                    if o.health <= 0 || a.species.flies() != o.species.flies() {
+                    let (rb, fb, wb) = body[j];
+                    if rb == 0 || fa != fb {
                         continue;
                     }
                     let a = self.ants[i];
-                    let min = (ra + o.species.stats().radius) * 7 / 10;
+                    let o = self.ants[j];
+                    let full = ra + rb;
+                    let min = if wa && wb { full * 7 / 10 } else { full };
+                    let (dx, dy) = (o.pos.x - a.pos.x, o.pos.y - a.pos.y);
+                    if dx.abs() >= min || dy.abs() >= min {
+                        continue;
+                    }
                     let d = a.pos.dist(o.pos);
                     if d >= min {
                         continue;
                     }
-                    let push = (min - d) / 2 + 1;
                     let (dx, dy) = if d == 0 {
                         let (jx, jy) = jitter(a.id ^ o.id);
                         (jx.max(1), jy)
                     } else {
-                        (o.pos.x - a.pos.x, o.pos.y - a.pos.y)
+                        (dx, dy)
                     };
                     let len =
                         isqrt((dx as i64 * dx as i64 + dy as i64 * dy as i64) as u64).max(1) as i32;
-                    let px = dx * push / len;
-                    let py = dy * push / len;
-                    let na = Pos::new(a.pos.x - px, a.pos.y - py);
-                    let no = Pos::new(o.pos.x + px, o.pos.y + py);
-                    if self.standable(&a, na) {
-                        self.ants[i].pos = na;
-                    }
-                    if self.standable(&o, no) {
-                        self.ants[j].pos = no;
+                    let gap = min - d;
+                    let half = gap / 2 + 1;
+                    let ux = |k: i32| (dx * k / len, dy * k / len);
+                    let (px, py) = ux(half);
+                    let moved_a = self.nudge(i, -px, -py);
+                    let moved_o = self.nudge(j, px, py);
+                    // One side stuck: the other takes the whole push.
+                    if !moved_a && moved_o {
+                        self.nudge(j, px, py);
+                    } else if moved_a && !moved_o {
+                        self.nudge(i, -px, -py);
                     }
                 }
             }
         }
         self.grid = grid;
+    }
+
+    /// Moves ant `i` by (dx, dy), or along one axis if the whole move is
+    /// blocked; whether it moved.
+    fn nudge(&mut self, i: usize, dx: i32, dy: i32) -> bool {
+        let a = self.ants[i];
+        let to = Pos::new(a.pos.x + dx, a.pos.y + dy);
+        for cand in [to, Pos::new(to.x, a.pos.y), Pos::new(a.pos.x, to.y)] {
+            if cand != a.pos && self.standable(&a, cand) {
+                self.ants[i].pos = cand;
+                return true;
+            }
+        }
+        false
     }
 
     /// Removes dead ants and destroyed structures.
@@ -1249,7 +1315,7 @@ impl World {
             self.colonies[c as usize].tally.lost += 1;
         }
         let mut gone: Vec<Id> = Vec::new();
-        let mut walls_changed = false;
+        let mut fallen: Vec<(i32, i32)> = Vec::new();
         let mut queens_lost: Vec<u8> = Vec::new();
         for s in &self.structures {
             if s.health <= 0 {
@@ -1258,8 +1324,8 @@ impl World {
                     for &(x, y) in &s.cells {
                         let i = self.map.idx(x, y);
                         self.wall[i] = NO_WALL;
+                        fallen.push((x, y));
                     }
-                    walls_changed = true;
                 }
                 if s.kind == StructureKind::Queen && s.complete {
                     queens_lost.push(s.colony);
@@ -1283,8 +1349,8 @@ impl World {
                 }
             }
         }
-        if walls_changed {
-            self.nav.invalidate();
+        if !fallen.is_empty() {
+            self.terrain_opened(&fallen);
         }
         for c in queens_lost {
             self.announce("notice.queen_lost", Some(c), None);

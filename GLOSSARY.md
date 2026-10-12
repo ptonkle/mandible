@@ -119,7 +119,7 @@ How to read the tables:
 | Drop-off | ★ | The place where gatherers deliver resources into the stockpile. Only queens are drop-offs. | collection point, depot, storehouse, warehouse |
 | Gather Rate | ★ | How fast a species gathers, per ant. | harvest speed, income (that is the colony total) |
 | Income | ★ | A colony's estimated resources per second, for each resource. Shown in the resource bar as "4 Food/s". Calculated by the core, never by the page. | gather rate (that is per ant), eco, per minute |
-| Saturated | ★ | A node with as many gatherers as it can usefully hold. | full, maxed, oversaturated (unless meant exactly) |
+| Saturated | ★ | A node with as many gatherers as it can usefully hold (8). A gatherer counts at its node through the whole gather cycle: walking there, gathering, and carrying back to a queen, until it chooses a node again at the queen. The "working/8" label over a node counts the same way. | full, maxed, oversaturated (unless meant exactly) |
 
 ## 4. Ants
 
@@ -347,7 +347,9 @@ Used in code, docs and conversation only. **Never shown on screen**, and no term
 
 | Term | Origin | Meaning | Never say |
 | --- | --- | --- | --- |
-| Overlap | ★ | How far ants may push into each other. Kept small so fights stay readable. | stacking, clumping |
+| Overlap | ★ | How far ants may push into each other. A combat ant keeps its whole body clear of every other ant on its layer (ground or air); two workers may overlap by 30%, so a node's gatherers fit round it. | stacking, clumping |
+| Flow field | ◆ | The shared map of distances to one goal that ants walk down. Built once per goal, mode and team; repaired, not rebuilt, when dirt is dug or a wall falls. | path, route (for the field itself) |
+| Terrain patch | ◆ | The part of the terrain image painted again round dug dirt, instead of the whole image. | redraw, refresh |
 | Tick | ◆ | One simulation step: 10 per second at Normal Game Speed. Used in code, docs and the Benchmark only. | frame (that is drawing), turn (that is the network's per-tick message) |
 | Turn | ◆ | A player's commands for one tick, sent to every peer in Online Multiplayer. | packet, input frame |
 | Menu Background | ★ | The dim, still picture behind each menu screen (TRIAGE row 89): a generated map's ground in a biome, under a dark layer, with ant silhouettes walking between chambers. Each screen has its own; it never moves. Not shown as a word on screen. | backdrop (that is the canvas clear colour in `render.rs`), wallpaper, splash |

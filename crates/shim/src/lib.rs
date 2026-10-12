@@ -103,8 +103,16 @@ impl Game {
         self.s.terrain_size()
     }
 
-    pub fn terrain(&self) -> Vec<u8> {
+    pub fn terrain(&mut self) -> Vec<u8> {
         self.s.terrain()
+    }
+
+    pub fn terrain_patch(&mut self) -> Vec<i32> {
+        self.s.terrain_patch()
+    }
+
+    pub fn terrain_patch_pixels(&mut self) -> Vec<u8> {
+        self.s.terrain_patch_pixels()
     }
 
     pub fn fog_stamp(&self) -> i32 {

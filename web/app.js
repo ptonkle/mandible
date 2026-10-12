@@ -678,9 +678,11 @@ function drawMatch() {
     lastText = "";
     const size = game.terrain_size();
     renderer.setImage(assets.images.terrain, size[0], size[1], game.terrain());
-    terrainStamp = ts;
+    terrainStamp = game.terrain_stamp();
     resize();
   }
+  const patch = game.terrain_patch();
+  if (patch.length) renderer.patchImage(assets.images.terrain, patch, game.terrain_patch_pixels());
   const fs = game.fog_stamp();
   if (fs !== fogStamp) {
     const size = game.fog_size();
