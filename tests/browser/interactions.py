@@ -52,6 +52,18 @@ def check_menus_fit(page, check):
 
 
 def run(page, check, engine):
+    # The tab icon (TRIAGE row 65): made by the core, an SVG data URL that
+    # the browser can decode (the CSP allows data: images).
+    icon = page.evaluate(
+        """() => new Promise((done) => {
+            const href = document.getElementById('tab-icon').href;
+            const img = new Image();
+            img.onload = () => done([href.slice(0, 19), img.naturalWidth > 0]);
+            img.onerror = () => done([href.slice(0, 19), false]);
+            img.src = href;
+        })"""
+    )
+    check(icon == ["data:image/svg+xml,", True], f"the tab icon is an SVG the browser draws {icon}")
     check_menus_fit(page, check)
     leaves = [t.strip() for t in page.locator(".leaf .leaf-text").all_inner_texts()]
     check(
@@ -185,6 +197,24 @@ def run(page, check, engine):
     played = page.evaluate("() => document.body.dataset.sound || ''")
     check(played == "warning", f"training past housing plays the Warning sound [{played}]")
 
+    # A refused placement (TRIAGE row 72): on the queen itself. The
+    # blueprint stays on the pointer (its Build button stays active), the
+    # notice shows, and no sound plays.
+    page.mouse.move(700, 400)
+    page.keyboard.press("Digit2")
+    page.keyboard.press("KeyW")
+    page.wait_for_timeout(200)
+    page.evaluate("() => { document.body.dataset.sound = ''; }")
+    box = page.locator("#map").bounding_box()
+    page.mouse.click(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+    page.locator("#notices .notice", has_text=STRINGS["notice.bad_place"]).wait_for(timeout=5000)
+    page.wait_for_timeout(500)
+    held = page.locator(".gbtn.active").count()
+    played = page.evaluate("() => document.body.dataset.sound || ''")
+    check(held == 1 and played == "", f"a refused placement stays on the pointer, with no sound [{held} {played!r}]")
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(200)
+
     # The Volume slider is in the in-match Menu (and in Player Settings).
     page.mouse.move(700, 400)
     page.keyboard.press("Escape")
@@ -233,6 +263,31 @@ def run(page, check, engine):
     page.click("#end\\.main_menu")
     page.wait_for_selector(".leaf", timeout=5000)
     check(True, "a spectator leaves to the Main Menu")
+
+    # The last human concedes while AIs play on (TRIAGE rows 76, 84): End
+    # Match or Keep Watching; the Menu then still offers End Match.
+    page.click("#go\\.play_vs_ai")
+    page.wait_for_selector("#pva\\.start", timeout=5000)
+    page.select_option("#ai\\.0", "you")
+    page.select_option("#pva\\.format", "free_for_all")
+    page.click("#pva\\.start")
+    page.wait_for_selector("#resources .res.food", timeout=10000)
+    page.mouse.move(700, 400)
+    page.keyboard.press("Escape")
+    page.click("#menu\\.concede")
+    page.click("#menu\\.concede_yes")
+    page.wait_for_selector("#menu\\.keep_watching", timeout=5000)
+    check(page.locator("#menu\\.end_match").count() == 1, "the last human out is offered End Match and Keep Watching")
+    page.click("#menu\\.keep_watching")
+    page.wait_for_timeout(300)
+    check(page.locator("#overlay").is_hidden(), "Keep Watching goes back to the map")
+    page.mouse.move(700, 400)
+    page.keyboard.press("Escape")
+    page.click("#menu\\.end_match")
+    page.locator("#overlay h2", has_text=STRINGS["end.defeat"]).wait_for(timeout=5000)
+    check(page.locator("#overlay svg.graph").count() == 1, "End Match from the Menu shows the end screen")
+    page.click("#end\\.main_menu")
+    page.wait_for_selector(".leaf", timeout=5000)
 
     # Player Settings → Benchmark: the performance scenario runs live and
     # its panel reports the budget (PLAN decision 25).

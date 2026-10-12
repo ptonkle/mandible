@@ -770,6 +770,7 @@ async function start() {
   // automated online check only.
   if (new URLSearchParams(location.search).has("codes")) game.act("flag.codes", "on", false, false);
   assets = JSON.parse(render_assets());
+  el("tab-icon").href = assets.tab_icon;
   bindInput();
   refresh();
   document.body.dataset.ready = "true";

@@ -69,26 +69,26 @@ One row per concrete change. Say what you did, what you expected, and what happe
 | 61 | Opened Match Settings | Map Type Random (and a random map) by default | A fixed Map Type | (see Expected) | open |
 | 62 | Watched gathering | A node's Saturation counts only ants gathering from it (or walking to it), not ants that left it | The number drops while an ant is not gathering | (see Expected) | open |
 | 63 | Picked species | Siege Ants: bonus damage against structures; no Leafcutter Ant | Leafcutter Ant | (see Expected) | open |
-| 64 | Finished an Evolve | A sound of its own | The same Complete sound as upgrades | (see Expected) | open |
-| 65 | Looked at the browser tab | A tab icon | None | (see Expected) | open |
+| 64 | Finished an Evolve | A sound of its own | The same Complete sound as upgrades | *Done: an Evolve sound of its own (a lower, longer fanfare with a held chord), separate from the upgrade Complete sound. Test: the two differ and an evolved notice plays `evolve` (break → `left: ["complete"] right: ["evolve"]`).* | done 2026-10-11 |
+| 65 | Looked at the browser tab | A tab icon | None | *Done: an ant head with open mandibles on an amber disc, as an SVG `data:` URL made by the core and set on `<link rel="icon">` in `index.html` by `app.js` (an SVG written in `web/` is refused by the page check, which bans any `://`, and the SVG namespace is one: SECOND-ORDER row 48). Browser check: it decodes in all three engines.* | done 2026-10-11 |
 | 66 | Opened the GitHub page | A tile grid of screenshots of big ant battles | Text only | (see Expected) | open |
 | 67 | Gathered with Balanced | Fewer Leaves | Too many Leaves | (see Expected) | open |
 | 68 | Built brood cells | Brood cells see farther | Short sight | (see Expected) | open |
 | 69 | Bought Gather Rate | Costs more, gives more; not a no-brainer | Too cheap for its bonus | (see Expected) | open |
 | 70 | Looked at Build Rate | A Training Rate upgrade (Build Rate is only for structures) | — | (see Expected) | open |
 | 71 | Built brood cells | Half the housing (15 → 8) | 15 each | (see Expected) | open |
-| 72 | Placement refused | No sound; the blueprint stays on the cursor to try elsewhere | A Warning, and placement ends | (see Expected) | open |
-| 73 | Placed in build mode | A ring around each queen showing where building is allowed | — | (see Expected) | open |
+| 72 | Placement refused | No sound; the blueprint stays on the cursor to try elsewhere | A Warning, and placement ends | *Done: the placement is checked before it is sent; a refused one shows its notice (Placement Blocked, Requires Queen, Not Enough …) with no sound, and the blueprint (or a wall, from its first end) stays on the pointer. Tests: core and browser (break → `left: Idle right: Place(BroodCell)`; browser `[0 '']`).* | done 2026-10-11 |
+| 73 | Placed in build mode | A ring around each queen showing where building is allowed | — | *Done: a ring round each of our queens (queen blueprints too) while placing anything but a queen or a wall; its radius is `BUILD_AREA` (16 cells), the constant the placement rule uses. Test: every cell the rule allows lies inside the ring and every Requires Queen cell outside; the ring is at that radius (break → `a ring point 3264,0 is off the radius 3072`).* | done 2026-10-11 |
 | 74 | Played 2v2 | No lag | Lag | (see Expected) | open |
-| 75 | Heard sounds | Quieter overall; no sound when a queen dies | Too loud; Alert on Queen Lost | (see Expected) | open |
-| 76 | Last human conceded | An option to end the match fully | — | (see Expected) | open |
-| 77 | Match ended | The whole map is shown | Fog stays | (see Expected) | open |
+| 75 | Heard sounds | Quieter overall; no sound when a queen dies | Too loud; Alert on Queen Lost | *Done: every sound at half the level (6 dB quieter), and a new player's Volume 50% (was 70%); a Volume already set is kept. Queen Lost plays nothing (the Alert sound is gone). Test: no sound above a fifth of full scale at the default Volume (break → `Warning peaks at 7147`).* | done 2026-10-11 |
+| 76 | Last human conceded | An option to end the match fully | — | *Done: when the last human is defeated (Concede or lost) while AIs play on, a Defeat panel offers End Match (the end screen) or Keep Watching (the whole map). Tests: core and browser, three engines.* | done 2026-10-11 |
+| 77 | Match ended | The whole map is shown | Fog stays | *Done: once a match is over (a team won, or End Match), the map, the fog and the minimap show the whole map, for players and spectators. Test: the fog image is clear after a Victory (break → `no Fog of War at the end`).* | done 2026-10-11 |
 | 78 | Read the end graphs | Players and AIs gather similar Leaves; fewer Leaves overall (costs higher, rate lower or lower priority) | Far more Leaves than the AIs; too many | (see Expected) | open |
 | 79 | Opened Match Settings | The Map Type selector shows the whole "Open Ground" | Cut off | (see Expected) | open |
 | 80 | Set up a match | Free choice of Team 1–4 per player, defaulting by format | Teams assumed from format | (see Expected) | open |
 | 81 | Started a match | Never every colony on one team | A match started with everyone on one team | (see Expected) | open |
 | 82 | Evolved | Evolve is a bigger investment | Too cheap | (see Expected) | open |
 | 83 | Started a match | Enough Carpenter Ants to carry a queen's cost in one trip | Several trips | (see Expected) | open |
-| 84 | Only AIs left in a match | A way out besides reloading | None | (see Expected) | open |
+| 84 | Only AIs left in a match | A way out besides reloading | None | *Done: with only AIs left, Menu (Esc) offers Resume, End Match and Main Menu, for a defeated player and for a spectator; End Match shows the end screen (Defeat, or Match Ended for a spectator). Online, End Match also leaves the room. Tests: core and browser.* | done 2026-10-11 |
 | 85 | Watched ants | Less overlap between ants | Ants overlap too much | (see Expected) | open |
 | 86 | Fought | Every attack does at least 1 damage | Some attacks do 0 | (see Expected) | open |

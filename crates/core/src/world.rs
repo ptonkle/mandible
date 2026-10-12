@@ -327,6 +327,11 @@ pub fn queen_clearance(queen_radius: i32, site_reach: i32) -> i32 {
 /// pickup clearance between two queens of one colony (about 8 cells).
 pub const QUEEN_SPACING: i32 = 9 * CELL;
 
+/// The Build Area: a structure other than a queen or a wall is placed with
+/// its centre at most this far from one of its colony's queens (a queen
+/// blueprint counts). Drawn as a ring round each queen while placing.
+pub const BUILD_AREA: i32 = 16 * CELL;
+
 /// The least distance from a node to the edge of a structure's footprint.
 pub const NODE_CLEARANCE: i32 = 3 * CELL / 2;
 
@@ -1434,7 +1439,7 @@ impl World {
                 let near = self.structures.iter().any(|s| {
                     s.colony == colony
                         && s.kind == StructureKind::Queen
-                        && s.pos.dist(centre) <= 16 * CELL
+                        && s.pos.dist(centre) <= BUILD_AREA
                 });
                 if !near {
                     return Err(Refusal::NeedsQueen);

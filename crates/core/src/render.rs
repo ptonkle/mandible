@@ -31,7 +31,7 @@ use crate::fog::Bits;
 use crate::map::Ground;
 use crate::rules::{Resource, Species, StructureKind, SATURATION};
 use crate::settings::Biome;
-use crate::world::{EffectKind, Job, Structure, World};
+use crate::world::{EffectKind, Job, Structure, World, BUILD_AREA};
 
 /// Draw-list units per screen pixel.
 pub const SUB_PX: i32 = 16;
@@ -132,7 +132,7 @@ pub const IMAGE_MINIMAP: i32 = 2;
 /// Every colour the page uses. Player colours come first, by seat: red, blue,
 /// yellow and white, chosen to be as far apart as possible and to stand out
 /// against both biomes' ground, always with a dark outline.
-pub const PALETTE: [&str; 29] = [
+pub const PALETTE: [&str; 30] = [
     "#f0302a",
     "#2f7cff",
     "#ffd400",
@@ -162,6 +162,7 @@ pub const PALETTE: [&str; 29] = [
     "#2a1d12",
     "#7a5c3e",
     "#ffb347",
+    "rgba(141,255,190,0.75)",
 ];
 const C_PLAYER: i32 = 0;
 const C_SOFT: i32 = 4;
@@ -186,6 +187,7 @@ const C_HOVER: i32 = 25;
 const C_POLE: i32 = 26;
 const C_FLOOR: i32 = 27;
 const C_BLAST_RING: i32 = 28;
+const C_BUILD_AREA: i32 = 29;
 
 /// Player colours as RGB, for the minimap.
 pub const PLAYER_RGB: [[u8; 3]; 4] = [
@@ -912,6 +914,39 @@ fn decimal(num: i32, den: i32) -> String {
     format!("{whole}.{digits}")
 }
 
+/// The tab icon (TRIAGE row 65): an ant head with open mandibles on an
+/// amber disc, as an SVG `data:` URL for the page's `<link rel="icon">`.
+/// It is made here because the SVG namespace is a URL, which no file in
+/// `web/` may name (`page_keeps_no_rule_and_names_no_other_origin`); the
+/// namespace is a name, not a request, and the icon loads nothing.
+pub fn tab_icon() -> String {
+    const SVG: &str = concat!(
+        "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'>",
+        "<circle cx='32' cy='32' r='31' fill='#e8a33c'/>",
+        // Antennae, elbowed like an ant's.
+        "<path d='M26 22 L 22 12 L 12 7 M38 22 L 42 12 L 52 7' fill='none' ",
+        "stroke='#2a1d12' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'/>",
+        // Mandibles: two curved pincers meeting below the head.
+        "<path d='M23 44 C 14 50, 15 59, 27 60 C 22 56, 23 51, 29 47 Z' fill='#2a1d12'/>",
+        "<path d='M41 44 C 50 50, 49 59, 37 60 C 42 56, 41 51, 35 47 Z' fill='#2a1d12'/>",
+        // The head, then its eyes.
+        "<ellipse cx='32' cy='35' rx='15' ry='14' fill='#2a1d12'/>",
+        "<ellipse cx='22' cy='32' rx='3' ry='4' fill='#f3dcae'/>",
+        "<ellipse cx='42' cy='32' rx='3' ry='4' fill='#f3dcae'/>",
+        "</svg>"
+    );
+    let mut url = String::from("data:image/svg+xml,");
+    for c in SVG.chars() {
+        match c {
+            '#' => url.push_str("%23"),
+            '<' => url.push_str("%3C"),
+            '>' => url.push_str("%3E"),
+            _ => url.push(c),
+        }
+    }
+    url
+}
+
 /// Everything the page needs once, as JSON text: op codes, image ids, the
 /// palette, every shape (lists of `[x, y]` polygons) and two exact decimals
 /// the page cannot work out itself: `base`, the draw-list unit in pixels,
@@ -936,6 +971,7 @@ pub fn assets_json() -> String {
         "shapes": shape_list,
         "aligns": op::ALIGNS,
         "font": {"weight": op::FONT_WEIGHT, "family": op::FONT_FAMILY},
+        "tab_icon": tab_icon(),
     });
     let mut text = v.to_string();
     text.pop();
@@ -2305,6 +2341,22 @@ pub fn frame(
     }
 
     if let Some(pl) = &overlay.place {
+        // The Build Area (TRIAGE row 73): a ring round each of our queens,
+        // blueprints included, exactly where `World::check_place` allows a
+        // structure that needs a queen nearby.
+        if needs_build_area(pl.kind) {
+            for s in world
+                .structures
+                .iter()
+                .filter(|s| s.colony == pl.colony && s.kind == StructureKind::Queen)
+            {
+                let (x, y) = cam.screen(s.pos);
+                let r = cam.length(BUILD_AREA);
+                if list.on_screen(x, y, r) {
+                    list.outline(C_BUILD_AREA, SUB_PX * 2, &circle(x, y, r, 72));
+                }
+            }
+        }
         let colour = if pl.valid { C_VALID } else { C_INVALID };
         let unit = body_unit(body_of(pl.kind));
         if pl.kind == StructureKind::Wall {
@@ -2331,6 +2383,12 @@ pub fn frame(
         }
     }
     list.out
+}
+
+/// Whether placing this kind is limited to the Build Area: everything but
+/// a queen (kept apart from other queens instead) and a wall.
+pub fn needs_build_area(kind: StructureKind) -> bool {
+    !matches!(kind, StructureKind::Queen | StructureKind::Wall)
 }
 
 /// The bounding box of a shape: (min x, min y, max x, max y).

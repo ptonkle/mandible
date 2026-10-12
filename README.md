@@ -28,7 +28,7 @@ Every game word is defined in [`GLOSSARY.md`](GLOSSARY.md). The design is in [`B
 | Grid tabs: Ants, Build, Waypoints, Upgrades, Colony | `1` `2` `3` `4` `5` |
 | Grid buttons, laid out like the keyboard | `Q W E R` / `A S D F` / `Z X C V` |
 | Train 10 / Train Max | Ctrl or Alt + button / Shift + button |
-| Place a blueprint | Button, then left-click the map. Shift + click keeps placing. |
+| Place a blueprint | Button, then left-click the map. Shift + click keeps placing. A refused spot shows its notice silently and the blueprint stays on the pointer. While placing, a ring round each of your queens shows the Build Area |
 | Set a waypoint (replaces that species' waypoints) | Button, then left-click the map |
 | Add a waypoint (up to 4 per species) | Button, then Shift + click; stays in waypoint mode |
 | All Ants waypoint, from any grid tab | `Tab`, then left-click the map (Shift + click adds) |
@@ -36,10 +36,11 @@ Every game word is defined in [`GLOSSARY.md`](GLOSSARY.md). The design is in [`B
 | Clear a waypoint; cancel a blueprint | Right-click it |
 | Cancel a queued item | Click it in the queue bar: one at a time, refunded. Ants of one species show once per queen or hatchery, with a ×N count. An upgrade shows its rank (I, II, III) on its picture; a Colony Upgrade has a gold double border, a Species Upgrade a green one |
 | Pan the view | Drag, arrow keys, screen edges (all four, even under the top bar), or the minimap. **Edge Pan Speed** (Player Settings): Very Slow to Very Fast |
-| After the match | Graph tabs: Food, Nectar, Leaves gathered, Combat Ants, Population, Killed, Lost; one line per colony, and every colony's summary |
+| After the match | The whole map is shown. Graph tabs: Food, Nectar, Leaves gathered, Combat Ants, Population, Killed, Lost; one line per colony, and every colony's summary |
 | Zoom | Mouse wheel |
 | Home Nest | `Space` |
 | Menu (Resume, Concede); cancel placement | `Esc` |
+| Out of the match while AIs play on | When the last human is defeated: End Match (the end screen) or Keep Watching (the whole map). The Menu then offers Resume, End Match, Main Menu; a spectator's Menu too |
 | Pause, Time Scale (×½ to ×4) | Top-bar buttons, in a Sandbox match or while spectating; never online |
 | Spectate an all-AI match | Play vs AI: set Red to an AI. The Fog of War button picks whose view to show (Off: the whole map) |
 
@@ -75,6 +76,8 @@ Needs Rust with the `wasm32-unknown-unknown` target, `wasm-bindgen-cli` 0.2.127,
 | `crates/core/src/ai.rs` | the AI (Larva, Pupa, Imago), inside the simulation |
 | `crates/core/src/lockstep/` | online lockstep: lobby, per-player turns, resync, agreed drops |
 | `crates/core/src/app.rs`, `keys.rs` | screens, settings, keybinds, action grid, tooltips, HUD |
+| `crates/core/src/sound.rs` | every sound, synthesised by the core as a WAV file; the page only plays it |
+| `crates/core/src/render.rs` | the draw list, terrain and fog images, icons, and the tab icon (an SVG data URL) |
 | `crates/shim` | the `wasm-bindgen` methods the page calls; each is one call into the core |
 | `web/` | the static page: DOM from the core's view model, canvas drawing, input |
 | `data/strings.json`, `data/glossary.json` | every on-screen word, and the term hints |
