@@ -7,7 +7,9 @@ use std::collections::BTreeMap;
 use crate::fixed::{heading16, isqrt, Pos, CELL};
 use crate::map::Ground;
 use crate::nav::{downhill, FieldKey, Mode, Terrain, NO_WALL, UNREACHED};
-use crate::rules::{damage_taken, ticks, Resource, Role, Species, StructureKind, SATURATION};
+use crate::rules::{
+    damage_taken, structure_damage_taken, ticks, Resource, Role, Species, StructureKind, SATURATION,
+};
 use crate::world::{
     drop_reach, pickup_reach, Ant, Effect, EffectKind, Id, Job, Target, World, INCOME_TICKS,
 };
@@ -645,6 +647,12 @@ impl World {
     /// are left alone (the ant would only press against the wall); the
     /// waypoint's flow field leads round instead.
     fn find_target(&self, a: &Ant, aggro: i32) -> Option<Target> {
+        // Siege Ants go for structures first (TRIAGE row 63).
+        if a.species.stats().role == Role::Siege {
+            if let Some(t) = self.find_structure(a, aggro) {
+                return Some(t);
+            }
+        }
         let me = a.colony;
         let mut ants: Vec<(i64, Id, Pos)> = Vec::new();
         for b in self.grid.around(a.pos, aggro) {
@@ -671,6 +679,13 @@ impl World {
                 }
             }
         }
+        self.find_structure(a, aggro)
+    }
+
+    /// The nearest enemy structure in reach that the ant can walk straight
+    /// to.
+    fn find_structure(&self, a: &Ant, aggro: i32) -> Option<Target> {
+        let me = a.colony;
         let mut found: Vec<(i64, Id, Pos)> = Vec::new();
         for b in self.grid.around(a.pos, aggro + 3 * CELL) {
             for &j in &self.grid.structures[b] {
@@ -1085,8 +1100,10 @@ impl World {
         }
     }
 
+    /// `damage` comes from `structure_damage_taken`; the floor is kept here
+    /// too, so no path can hit for 0 (TRIAGE row 86).
     fn hit_structure(&mut self, si: usize, damage: i32) {
-        self.structures[si].health -= damage;
+        self.structures[si].health -= damage.max(crate::rules::MIN_DAMAGE);
     }
 
     fn strike(&mut self, a: &mut Ant, t: Target, st: &crate::rules::Stats) {
@@ -1111,6 +1128,7 @@ impl World {
             a.spent = true;
             a.health = 0;
         }
+        let on_structure = structure_damage_taken(st);
         if st.splash > 0 {
             let r = st.splash;
             for b in self.grid.around(tp, r + CELL) {
@@ -1128,12 +1146,12 @@ impl World {
                         continue;
                     };
                     if !self.allied(s.colony, a.colony) && s.pos.dist(tp) <= r + s.radius() {
-                        self.hit_structure(sj as usize, st.damage);
+                        self.hit_structure(sj as usize, on_structure);
                     }
                 }
             }
             if let Target::Dirt(x, y) = t {
-                self.dig(x, y, st.damage);
+                self.dig(x, y, on_structure);
             }
             return;
         }
@@ -1145,10 +1163,10 @@ impl World {
             }
             Target::Structure(id) => {
                 if let Some(si) = self.structure_index(id) {
-                    self.hit_structure(si, st.damage);
+                    self.hit_structure(si, on_structure);
                 }
             }
-            Target::Dirt(x, y) => self.dig(x, y, st.damage),
+            Target::Dirt(x, y) => self.dig(x, y, on_structure),
         }
     }
 
@@ -1157,7 +1175,7 @@ impl World {
             return;
         }
         let i = self.map.idx(x, y);
-        self.dirt[i] -= damage.min(i16::MAX as i32) as i16;
+        self.dirt[i] -= damage.clamp(crate::rules::MIN_DAMAGE, i16::MAX as i32) as i16;
         if self.dirt[i] <= 0 {
             self.dirt[i] = 0;
             self.map.ground[i] = Ground::Floor;

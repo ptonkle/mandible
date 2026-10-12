@@ -310,8 +310,10 @@ fn evolving_raises_the_tier_after_its_duration() {
     let mut w = world(9);
     w.colonies[0].stock = [1000, 1000, 1000];
     w.apply(0, &Command::Evolve);
-    assert_eq!(w.colonies[0].stock, [700, 850, 1000]);
-    run(&mut w, ticks(200) - 1);
+    // TRIAGE row 82: Tier 2 costs 400 Food, 150 Nectar, 150 Leaves and
+    // takes 35 s.
+    assert_eq!(w.colonies[0].stock, [600, 850, 850]);
+    run(&mut w, ticks(350) - 1);
     assert_eq!(w.colonies[0].tier, 1);
     run(&mut w, 1);
     assert_eq!(w.colonies[0].tier, 2);
@@ -413,7 +415,7 @@ fn carpenters_apply_each_load_as_it_arrives() {
     // 60 Leaves at 50 per trip: the first load is applied while the second
     // is still on its way.
     assert!(built_before_all_arrived, "no waiting for the whole cost");
-    assert_eq!(w.housing(0), 35, "queen 20 + brood cell 15");
+    assert_eq!(w.housing(0), 28, "queen 20 + brood cell 8");
 }
 
 #[test]
@@ -1158,8 +1160,8 @@ fn colonies_record_a_sample_every_ten_seconds() {
     let h = &w.colonies[0].history;
     assert_eq!(h.len(), 3);
     assert_eq!(h[2].tick, tool_core::world::SAMPLE_TICKS * 3);
-    // Six Harvester Ants, two Carpenter Ants: 8 workers; 2 Soldier Ants: 2 army.
-    assert_eq!(h[0].workers, 8);
+    // Six Harvester Ants, four Carpenter Ants: 10 workers; 2 Soldier Ants: 2 army.
+    assert_eq!(h[0].workers, 10);
     assert_eq!(h[0].army, 2);
     assert!(h[2].gathered.iter().sum::<i32>() >= h[0].gathered.iter().sum::<i32>());
 }
@@ -1552,10 +1554,11 @@ fn an_enemy_behind_rock_does_not_hold_an_ant_against_it() {
 
 #[test]
 fn balanced_sends_a_sixth_of_harvesters_to_nectar_and_starts_with_little() {
-    // Balanced is Food 3 : Nectar 1 : Leaves 2. Worked by hand for 12 idle
-    // Harvester Ants choosing in turn, each taking the resource with the
-    // most weight per ant already on it (ties to Food, then Nectar): F L F
-    // F N L F L F F N L, so 6 Food, 2 Nectar, 4 Leaves.
+    // Balanced is Food 7 : Nectar 2 : Leaves 3 (TRIAGE rows 67 and 78: was
+    // 3 : 1 : 2). Worked by hand for 12 idle Harvester Ants choosing in
+    // turn, each taking the resource with the most weight per ant already
+    // on it (ties to Food, then Nectar): F F L F N F L F F F N L, so 7
+    // Food, 2 Nectar, 3 Leaves: a quarter on Leaves, not a third.
     let mut w = arena(4);
     let h = home(&w, 0);
     for _ in 0..12 {
@@ -1570,7 +1573,7 @@ fn balanced_sends_a_sixth_of_harvesters_to_nectar_and_starts_with_little() {
             by[r.index()] += 1;
         }
     }
-    assert_eq!(by, [6, 2, 4]);
+    assert_eq!(by, [7, 2, 3]);
     // Normal Starting Resources: 50 Nectar; the home Flower holds 1,000.
     let w = world(4);
     assert_eq!(w.colonies[0].stock, [300, 50, 200]);
@@ -1602,4 +1605,117 @@ fn an_ai_with_nothing_left_to_defend_stops_scouting() {
         w.colonies[0].auto_scout,
         "a player's Auto-Scout is untouched"
     );
+}
+
+// ---- TRIAGE rows 63, 70, 83, 86: balance and species ----
+
+#[test]
+fn a_siege_ant_goes_for_a_structure_and_hits_it_for_thirty() {
+    // A Siege Ant (3 Damage, 30 Structure Damage) near an enemy brood cell
+    // attacks it for 30 a hit.
+    let mut w = arena(21);
+    let h = home(&w, 0);
+    put(&mut w, 0, Species::Siege, near(h, 3, 0));
+    let id = w.add_structure(1, StructureKind::BroodCell, near(h, 6, 0), vec![], true);
+    let start = w.structure(id).unwrap().health;
+    run(&mut w, ticks(40));
+    let lost = start - w.structure(id).map(|s| s.health).unwrap_or(0);
+    assert!(
+        lost >= 60 && lost % 30 == 0,
+        "lost {lost}: whole hits of 30"
+    );
+}
+
+#[test]
+fn a_siege_ant_attacks_a_structure_before_an_ant() {
+    // An enemy Soldier Ant and an enemy brood cell, both in reach: the
+    // Siege Ant goes for the brood cell; a Soldier Ant goes for the ant.
+    for (sp, wants_structure) in [(Species::Siege, true), (Species::Soldier, false)] {
+        let mut w = arena(24);
+        let h = home(&w, 0);
+        let me = put(&mut w, 0, sp, near(h, 3, 0));
+        put(&mut w, 1, Species::Soldier, near(h, 3, 3));
+        w.add_structure(1, StructureKind::BroodCell, near(h, 6, 0), vec![], true);
+        run(&mut w, 2);
+        let t = w.ants.iter().find(|a| a.id == me).unwrap().target;
+        let on_structure = matches!(t, Some(tool_core::world::Target::Structure(_)));
+        assert_eq!(on_structure, wants_structure, "{sp:?} target {t:?}");
+    }
+}
+
+#[test]
+fn a_retreating_nurse_ant_chips_an_enemy_wall() {
+    // TRIAGE row 86: a Nurse Ant has no Damage, but when it must break an
+    // enemy wall to get home, every hit still deals 1.
+    let mut w = arena(17);
+    wall_ring(&mut w, 1, 0, 8, true);
+    let c = w.map.chambers[w.map.centre].clone();
+    put(&mut w, 0, Species::Nurse, Pos::of_cell(c.cx, c.cy));
+    let walls = |w: &World| -> i32 {
+        w.structures
+            .iter()
+            .filter(|s| s.kind == StructureKind::Wall)
+            .map(|s| s.health)
+            .sum()
+    };
+    let full = walls(&w);
+    w.apply(0, &Command::Retreat { on: true });
+    run(&mut w, ticks(1200));
+    let now = walls(&w);
+    assert!(now < full, "the wall took no damage ({now} of {full})");
+}
+
+#[test]
+fn training_rate_trains_faster_including_ants_already_queued() {
+    // TRIAGE row 70: Training Rate I is +25%: a Soldier Ant's 8 s (160
+    // ticks) becomes 128. Worked by hand: ten Soldier Ants and Training
+    // Rate I queued together. Research takes 25 s (500 ticks); by then three
+    // Soldier Ants are out (160, 320, 480) and the fourth is 20 of 160 in,
+    // rescaled to 16 of 128, so it is out at 500 + 112 = 612 and the tenth
+    // at 612 + 6 x 128 = 1380 (1600 without the upgrade).
+    let mut w = arena(22);
+    w.colonies[0].stock = [5000, 5000, 5000];
+    w.apply(
+        0,
+        &Command::Research {
+            upgrade: Upgrade::TrainingRate,
+        },
+    );
+    w.apply(
+        0,
+        &Command::Train {
+            species: Species::Soldier,
+            amount: Amount::Ten,
+        },
+    );
+    let soldiers = |w: &World| {
+        w.ants
+            .iter()
+            .filter(|a| a.colony == 0 && a.species == Species::Soldier)
+            .count()
+    };
+    run(&mut w, 611);
+    assert_eq!(soldiers(&w), 3);
+    run(&mut w, 1);
+    assert_eq!(soldiers(&w), 4);
+    run(&mut w, 1379 - 612);
+    assert_eq!(soldiers(&w), 9);
+    run(&mut w, 1);
+    assert_eq!(soldiers(&w), 10);
+    assert_eq!(w.colonies[0].ranks.apply(Species::Soldier).train_ticks, 128);
+}
+
+#[test]
+fn starting_carpenters_carry_a_whole_queen_in_one_trip() {
+    // TRIAGE row 83: four Carpenter Ants at 50 Leaves each carry a queen's
+    // 200 Leaves.
+    let w = world(23);
+    let carry: i32 = w
+        .ants
+        .iter()
+        .filter(|a| a.colony == 0 && a.species == Species::Carpenter)
+        .map(|a| a.species.stats().carry)
+        .sum();
+    assert_eq!(carry, 200);
+    assert!(carry >= StructureKind::Queen.stats().cost[2]);
 }

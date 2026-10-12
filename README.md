@@ -12,10 +12,13 @@ Every game word is defined in [`GLOSSARY.md`](GLOSSARY.md). The design is in [`B
 | Gather | Harvester Ants gather by themselves. Choose a **Gather Focus** on the Colony tab. Every node has a **Saturation** of 8. |
 | Spend | Every resource goes into one **stockpile**, spendable anywhere at once. |
 | Build | Place a **blueprint** (Build tab). Carpenter Ants carry its cost from a queen to the blueprint, then build it. |
-| Housing | Queens give 20 and brood cells give 15, up to the **Pop Cap** of 300. Training waits while **Housing Full**. |
+| Start | One queen, 6 Harvester Ants, 2 Soldier Ants and 4 Carpenter Ants: enough to carry a new queen's 200 Leaves in one trip. |
+| Housing | Queens give 20 and brood cells give 8 (60 Leaves each), up to the **Pop Cap** of 300. Training waits while **Housing Full**. |
 | Train | From anywhere, with no selection: Tier 1 species from queens, the rest from their **hatchery**. |
 | Fight | Set **waypoints** per species (Waypoints tab). Ants walk there and fight whatever they meet on the way. **All Ants** sets one waypoint for every combat species. |
-| Tech | **Evolve** to Tier 2 and Tier 3 (Colony tab) to unlock species and upgrade ranks. |
+| Tech | **Evolve** to Tier 2 (400 Food, 150 Nectar, 150 Leaves, 35 s) and Tier 3 (700 Food, 400 Nectar, 250 Leaves, 50 s) on the Colony tab, to unlock species and upgrade ranks. |
+| Economy upgrades | Colony tab. **Gather Rate** I–III: +30% a rank, 200 Food + 120 Leaves a rank. **Training Rate** I–II: +25% a rank at queens and hatcheries, 120 Food + 40 Nectar + 100 Leaves a rank. **Build Rate** I: structures only. |
+| Siege | The **Siege Ant** (Tier 2, Siege Ant Hatchery) attacks structures first: 30 **Structure Damage** a hit, but only 3 Damage against ants. Every attack deals at least 1. |
 | Sandbox | **Sandbox** (Match Settings): unlimited resources and Tier 3 for human colonies, plus Pause and Time Scale. |
 | Scout | **Auto-Scout** (Colony tab): one combat ant explores by itself. **Map Revealed** (Match Settings) starts every colony with the map Explored. |
 | Online | **Host** with the Room Code empty fills in a random code (6 characters, no 1, 0, I or O) to share; **Join** with the code. Codes are not case-sensitive. |

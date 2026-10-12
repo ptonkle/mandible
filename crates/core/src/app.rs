@@ -92,7 +92,7 @@ pub fn grid(tab: usize) -> [Option<Button>; 12] {
             g[0] = Some(Button::Train(Species::Harvester));
             g[1] = Some(Button::Train(Species::Soldier));
             g[2] = Some(Button::Train(Species::Carpenter));
-            g[3] = Some(Button::Train(Species::Leafcutter));
+            g[3] = Some(Button::Train(Species::Siege));
             for (i, s) in ROW_SPECIES.iter().enumerate() {
                 g[4 + i] = Some(Button::Train(*s));
             }
@@ -101,7 +101,7 @@ pub fn grid(tab: usize) -> [Option<Button>; 12] {
             g[0] = Some(Button::Place(StructureKind::Queen));
             g[1] = Some(Button::Place(StructureKind::BroodCell));
             g[2] = Some(Button::Place(StructureKind::Wall));
-            g[3] = Some(Button::Place(StructureKind::Hatchery(Species::Leafcutter)));
+            g[3] = Some(Button::Place(StructureKind::Hatchery(Species::Siege)));
             for (i, s) in ROW_SPECIES.iter().enumerate() {
                 g[4 + i] = Some(Button::Place(StructureKind::Hatchery(*s)));
             }
@@ -109,6 +109,7 @@ pub fn grid(tab: usize) -> [Option<Button>; 12] {
         2 => {
             g[0] = Some(Button::Waypoint(None));
             g[1] = Some(Button::Waypoint(Some(Species::Soldier)));
+            g[3] = Some(Button::Waypoint(Some(Species::Siege)));
             for (i, s) in ROW_SPECIES.iter().enumerate() {
                 g[4 + i] = Some(Button::Waypoint(Some(*s)));
             }
@@ -133,6 +134,7 @@ pub fn grid(tab: usize) -> [Option<Button>; 12] {
             g[7] = Some(Button::Focus(Focus::Leaves));
             g[8] = Some(Button::Research(Upgrade::BuildRate));
             g[9] = Some(Button::AutoScout);
+            g[10] = Some(Button::Research(Upgrade::TrainingRate));
         }
     }
     g
@@ -1606,6 +1608,12 @@ impl App {
                         } else {
                             self.t("stat.melee")
                         },
+                    ));
+                }
+                if st.structure_damage > 0 {
+                    rows.push(row(
+                        "stat.structure_damage",
+                        st.structure_damage.to_string(),
                     ));
                 }
                 if st.splash > 0 {
@@ -3175,9 +3183,10 @@ fn upgrade_change(u: Upgrade) -> (&'static str, &'static str) {
         Upgrade::Damage => ("stat.damage", "+1"),
         Upgrade::Armor => ("stat.armor", "+1"),
         Upgrade::Health => ("stat.health", "+10%"),
-        Upgrade::GatherRate => ("stat.gather_rate", "+20%"),
+        Upgrade::GatherRate => ("stat.gather_rate", "+30%"),
         Upgrade::CarryCapacity => ("stat.carry_capacity", "+3"),
         Upgrade::BuildRate => ("stat.build_rate", "+50%"),
+        Upgrade::TrainingRate => ("stat.training_rate", "+25%"),
         Upgrade::Species(s) => match s {
             Species::Soldier => ("stat.health", "+15"),
             Species::Fire => ("stat.move_speed", "+15%"),

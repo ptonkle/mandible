@@ -457,7 +457,7 @@ fn queen_and_brood_cell_tooltips_have_an_effect_row_and_build_buttons_a_tier() {
         "Train Harvester Ant, Soldier Ant, Carpenter Ant · Drop-off · Housing +20".into()
     )));
     let brood = button(&mut a, 1, 1);
-    assert!(rows_of(&brood).contains(&("Effect".into(), "Housing +15".into())));
+    assert!(rows_of(&brood).contains(&("Effect".into(), "Housing +8".into())));
     // Tier badges: Queen 1, Acid Ant Hatchery (D) 2, Dinosaur Ant Hatchery 3.
     assert_eq!(queen["tier"], "T1");
     assert_eq!(button(&mut a, 1, 6)["tier"], "T2");
@@ -840,12 +840,12 @@ fn training_with_no_housing_room_plays_a_warning_once() {
     let mut a = app();
     start_match(&mut a);
     {
-        // Fill the queen's 20 housing: 10 ants now + 10 queued.
+        // Fill the queen's 20 housing: 12 ants now + 10 queued.
         let g = a.game.as_mut().unwrap();
         g.world.colonies[0].stock = [5000, 0, 0];
     }
     a.act("tab.0", "", false, false);
-    a.act("grid.1", "", true, false); // Train 10 Soldier Ants: 10 + 10 = 20, room for all
+    a.act("grid.1", "", true, false); // Train 10 Soldier Ants: 12 < 20 when pressed
     a.advance(100);
     assert!(
         a.ui().get("sounds").is_none(),
