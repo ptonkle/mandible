@@ -55,6 +55,10 @@ The details are in `SECOND-ORDER.md` rows 37–40.
 - **Check:** `BUILDER_ORIGIN=https://ptonkle.github.io/mandible .venv/bin/python tests/browser/check.py` passed in chromium, firefox and webkit, against the live site.
 - **Redeployed 2026-10-11** from commit `3dd622e` (site commit `46d17d5`): lobby, Ready Up, Rematch, sound, volume slider, maps and balance. Name scan clean; live browser check passed in all three engines.
 
+## Match History (TRIAGE row 88, 2026-10-11)
+
+A fifth Main Menu leaf opens Match History. It holds the last 50 matches, numbered with no date, newest first; `crates/core/src/history.rs` does the work. `./scripts/check.sh` result on this branch: BUILDER CHECK PASSED, with the BROWSER CHECK PASSED in chromium, firefox and webkit, including the new Match History checks. The details are in `SECOND-ORDER.md` rows 47–51.
+
 ## What passed
 
 `./scripts/check.sh` on 2026-10-11, commit `23c8f2a` (plus this file and MEASUREMENTS.md):

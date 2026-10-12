@@ -44,6 +44,8 @@ pub enum Screen {
     Online,
     Lobby,
     Match,
+    /// Match History (TRIAGE row 88): see `crate::history`.
+    MatchHistory,
 }
 
 /// What a grid button does in the current tab.
@@ -184,6 +186,8 @@ pub struct Game {
     pub time_scale: usize,
     /// The end screen's graph tab: an index into `END_GRAPHS`.
     pub end_graph: usize,
+    /// Match History: whether this match is recorded, and whether You conceded.
+    pub history_mark: crate::history::Mark,
 }
 
 impl Game {
@@ -217,6 +221,7 @@ impl Game {
             paused: false,
             time_scale: 1,
             end_graph: 0,
+            history_mark: Default::default(),
         }
     }
 
@@ -321,6 +326,8 @@ pub struct App {
     pub sounds: Vec<Cue>,
     /// When each sound last played, for its cooldown.
     pub last_cue: BTreeMap<Cue, i64>,
+    /// Match History: the recorded matches and its screen's state.
+    pub match_history: crate::history::MatchHistory,
 }
 
 fn text_map(json: &str) -> Result<BTreeMap<String, String>, String> {
@@ -384,6 +391,7 @@ impl App {
             navigate: None,
             sounds: Vec::new(),
             last_cue: BTreeMap::new(),
+            match_history: Default::default(),
         })
         .map(|mut app: App| {
             app.online.status = app.t("online.idle");
@@ -445,6 +453,7 @@ impl App {
                 Screen::Online => "online",
                 Screen::Lobby => "lobby",
                 Screen::Match => "match",
+                Screen::MatchHistory => "match_history",
             },
             "title": self.t("title"),
             // Keybinds is waiting for a key: the page keeps Tab, Space and
@@ -462,6 +471,7 @@ impl App {
         if let Some(save) = self.save.take() {
             v["save"] = save;
         }
+        self.history_frame(&mut v);
         if !self.online.requests.is_empty() {
             v["net_requests"] = Value::Array(std::mem::take(&mut self.online.requests));
         }
@@ -680,6 +690,7 @@ impl App {
                     self.button("go.online", "menu.online"),
                     self.button("go.match_settings", "menu.match_settings"),
                     self.button("go.player_settings", "menu.player_settings"),
+                    self.button("go.match_history", "menu.match_history"),
                 ]
             })],
             Screen::MatchSettings => vec![
@@ -815,6 +826,7 @@ impl App {
             Screen::Online => self.online_panels(),
             Screen::Lobby => self.lobby_panels(),
             Screen::Match => Vec::new(),
+            Screen::MatchHistory => self.history_panels(),
         }
     }
 
@@ -1930,6 +1942,9 @@ impl App {
     /// A click or change on a menu element, a grid button, a tab, or a
     /// queue item. `value` carries the new value of a field.
     pub fn act(&mut self, id: &str, value: &str, ctrl: bool, shift: bool) {
+        if self.history_act(id, value) {
+            return;
+        }
         match id {
             "go.main_menu" | "end.main_menu" => {
                 self.leave_online();
@@ -3194,7 +3209,7 @@ fn button_icon(b: Button) -> String {
 }
 
 /// "m:ss" from ticks.
-fn clock(ticks: i32) -> String {
+pub(crate) fn clock(ticks: i32) -> String {
     format!(
         "{}:{:02}",
         ticks / TICKS_PER_SECOND / 60,
@@ -3221,7 +3236,7 @@ fn speed_key(s: GameSpeed) -> &'static str {
     }
 }
 
-fn map_type_key(t: MapType) -> &'static str {
+pub(crate) fn map_type_key(t: MapType) -> &'static str {
     match t {
         MapType::Tunnels => "tunnels",
         MapType::Open => "open",
@@ -3229,7 +3244,7 @@ fn map_type_key(t: MapType) -> &'static str {
     }
 }
 
-fn biome_key(b: Biome) -> &'static str {
+pub(crate) fn biome_key(b: Biome) -> &'static str {
     match b {
         Biome::Picnic => "picnic",
         Biome::FlowerField => "flower_field",
@@ -3239,7 +3254,7 @@ fn biome_key(b: Biome) -> &'static str {
     }
 }
 
-fn difficulty_key(d: Difficulty) -> &'static str {
+pub(crate) fn difficulty_key(d: Difficulty) -> &'static str {
     match d {
         Difficulty::Larva => "larva",
         Difficulty::Pupa => "pupa",

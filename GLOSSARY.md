@@ -352,3 +352,16 @@ Added for TRIAGE rows 37, 40, 41, 43 and 49. Shown on screen; proposed until the
 | Ready Up, Readied | ◆ | Lobby only. Ready Up is the button a joined player presses when set to play; pressing it again undoes it. A seat that pressed it is Readied, shown in the seat's Status. The host's Start is enabled only when every joined player is Readied; a change to the Match Settings clears every mark. Not the action-button state Ready. Term hint: "Press again to undo; the host can Start once every joined player is Readied." | unready, check in, confirm |
 | Rematch | ★ | End-screen button. Play vs AI: a new match with the same Match Settings and seats on a new seed. Online, the host's Rematch brings every player back to the same Lobby, with Readied cleared. | replay, play again, restart |
 | Not Connected, Connecting, In Lobby, Refused, Lobby Closed, Connection Lost | ◆ | The values of Status on the Online Multiplayer screen and in the Lobby: no online session; waiting to reach the host; seated in a lobby; the host turned you away (with the reason); the host left the lobby; the link to the host closed. | offline, waiting for players, kicked |
+
+## 15. Match History (proposed 2026-10-11)
+
+Added for TRIAGE row 88. Shown on screen; proposed until the person sees them.
+
+| Term | Origin | Meaning | Never say |
+| --- | --- | --- | --- |
+| Match History | ◆ | The Main Menu screen listing the last 50 matches played or spectated on this device, newest first, ten to a page. Each is numbered (Match 1, Match 2, …; there is no date, since the core reads no clock) and shows its Result, Mode, Format, Map Type, Biome, Match Length, every colony (player color, Team, You, Player Name or AI and Difficulty) and the end-screen summary. Kept in browser storage only. | match log, game history, replays, stats |
+| Result | ◆ | Match History label: how a match ended for this device: Victory, Defeat, Conceded, or for a spectated match "Victory: ‹team›". | outcome, score |
+| Conceded | ◆ | The Result of a match in which You pressed Concede. | surrendered, forfeited, quit |
+| Mode | ◆ | Match History label: how the match was played: Play vs AI, Online Multiplayer or Spectate. | game type, queue |
+| Older, Newer | ◆ | Match History buttons that turn to the next page of older or newer matches. | next page, previous, more |
+| Clear | ◆ | Match History button that removes every recorded match, after a confirmation. Numbers keep counting after a Clear. Also the first word of Clear Waypoint, with the same sense: remove. | delete, reset (that is for settings), wipe |

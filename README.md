@@ -20,6 +20,7 @@ Every game word is defined in [`GLOSSARY.md`](GLOSSARY.md). The design is in [`B
 | Scout | **Auto-Scout** (Colony tab): one combat ant explores by itself. **Map Revealed** (Match Settings) starts every colony with the map Explored. |
 | Online | **Host** with the Room Code empty fills in a random code (6 characters, no 1, 0, I or O) to share; **Join** with the code. Codes are not case-sensitive. |
 | Events | A **Windfall** (a cache of resources) or a **Hill** (hold it longest to win a bundle) appears every 60–90 s from 1:30. |
+| History | **Match History** (Main Menu): the last 50 matches on this device, newest first, numbered, with Result, Format, Map Type, Biome, Match Length, every colony and the end-screen summary. Kept in browser storage only; **Clear** empties it. |
 
 ### Controls
 
@@ -75,6 +76,7 @@ Needs Rust with the `wasm32-unknown-unknown` target, `wasm-bindgen-cli` 0.2.127,
 | `crates/core/src/ai.rs` | the AI (Larva, Pupa, Imago), inside the simulation |
 | `crates/core/src/lockstep/` | online lockstep: lobby, per-player turns, resync, agreed drops |
 | `crates/core/src/app.rs`, `keys.rs` | screens, settings, keybinds, action grid, tooltips, HUD |
+| `crates/core/src/history.rs` | Match History: recording each finished match, its stored format and version, its screen |
 | `crates/shim` | the `wasm-bindgen` methods the page calls; each is one call into the core |
 | `web/` | the static page: DOM from the core's view model, canvas drawing, input |
 | `data/strings.json`, `data/glossary.json` | every on-screen word, and the term hints |

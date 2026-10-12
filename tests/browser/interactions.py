@@ -24,7 +24,7 @@ def text(page, selector):
 # Layout rule (TRIAGE row 31): every menu screen fits this window with no
 # scroll bar. 1280 x 720 is a common small laptop screen.
 FIT_W, FIT_H = 1280, 720
-MENU_SCREENS = ["go.play_vs_ai", "go.online", "go.match_settings", "go.player_settings"]
+MENU_SCREENS = ["go.play_vs_ai", "go.online", "go.match_settings", "go.player_settings", "go.match_history"]
 
 
 def fits(page):
@@ -51,12 +51,31 @@ def check_menus_fit(page, check):
         page.wait_for_selector(".leaf", timeout=5000)
 
 
+def check_history(page, check, when):
+    page.click("#go\\.match_history")
+    page.wait_for_selector("#history\\.show\\.1", timeout=5000)
+    row = [t.strip() for t in page.locator("#panels table.cells tr >> nth=1").locator("td").all_inner_texts()]
+    want = [STRINGS["history.match"] + " 1", STRINGS["history.conceded"], STRINGS["format.one_v_one"]]
+    check(row[:3] == want, f"Match History lists {when} as {want} {row}")
+    stored = page.evaluate("() => JSON.parse(localStorage.getItem('history') || '{}').matches?.length ?? 0")
+    check(stored == 1, f"Match History is kept in browser storage ({when}) [{stored}]")
+    page.click("#history\\.show\\.1")
+    page.wait_for_timeout(200)
+    heads = [t.strip() for t in page.locator("#panels table.cells >> nth=1").locator("th").all_inner_texts()]
+    you = STRINGS["color.0"] + " · " + STRINGS["seat.you"]
+    check(you in heads, f"the match's summary has a column per colony {heads}")
+    over = fits(page)
+    check(over == (0, 0), f"Match History with a match fits {FIT_W}x{FIT_H} with no scroll bar {over}")
+    page.click("#go\\.main_menu")
+    page.wait_for_selector(".leaf", timeout=5000)
+
+
 def run(page, check, engine):
     check_menus_fit(page, check)
     leaves = [t.strip() for t in page.locator(".leaf .leaf-text").all_inner_texts()]
     check(
-        leaves == [STRINGS["menu.play_vs_ai"], STRINGS["menu.online"], STRINGS["menu.match_settings"], STRINGS["menu.player_settings"]],
-        f"the main menu shows the four leaves from the brief {leaves}",
+        leaves == [STRINGS["menu.play_vs_ai"], STRINGS["menu.online"], STRINGS["menu.match_settings"], STRINGS["menu.player_settings"], STRINGS["menu.match_history"]],
+        f"the main menu shows the four leaves from the brief and Match History {leaves}",
     )
 
     # Each leaf is a different kind of leaf (oak, maple, willow, lily pad).
@@ -65,7 +84,7 @@ def run(page, check, engine):
             [...l.querySelectorAll('.leaf-shape')].filter(s => getComputedStyle(s).display !== 'none')
             .map(s => s.classList[1]).join(' '))"""
     )
-    check(kinds == ["oak", "maple", "willow", "lily"], f"each main menu leaf is a different kind {kinds}")
+    check(kinds == ["oak", "maple", "willow", "lily", "ginkgo"], f"each main menu leaf is a different kind {kinds}")
     overflow = page.evaluate("() => getComputedStyle(document.getElementById('menus')).overflowX")
     check(overflow == "hidden", f"no horizontal scroll bar while a leaf is dragged away [{overflow}]")
 
@@ -213,6 +232,14 @@ def run(page, check, engine):
     page.click("#end\\.main_menu")
     page.wait_for_selector(".leaf", timeout=5000)
     check(True, "Main Menu returns after the match")
+
+    # Match History (row 88): the conceded match is Match 1, Conceded, 1v1;
+    # the core's text is in browser storage and survives a reload.
+    check_history(page, check, "the finished match")
+    page.reload()
+    page.wait_for_selector("body[data-ready='true']", timeout=20000)
+    page.wait_for_selector(".leaf", timeout=5000)
+    check_history(page, check, "after a reload")
 
     # Spectate (row 20): Red as an AI; no action grid; Fog of War, Pause and
     # Time Scale in the top bar.

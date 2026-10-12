@@ -94,13 +94,15 @@ table.pairs td:first-child { color: var(--muted); white-space: nowrap; width: 12
 .leaf:hover { transform: rotate(-2deg) scale(1.04); }
 .leaf .leaf-shape { position: absolute; inset: 0; width: 100%; height: 100%; display: none; }
 .leaf .leaf-shape path { fill: var(--leaf); stroke: var(--leaf-dark); stroke-width: 3; stroke-linejoin: round; }
-/* One kind of leaf per button, in order: oak, maple, willow, lily pad. */
-.leaf:nth-child(4n + 1) .oak, .leaf:nth-child(4n + 2) .maple,
-.leaf:nth-child(4n + 3) .willow, .leaf:nth-child(4n + 4) .lily { display: block; }
+/* One kind of leaf per button, in order: oak, maple, willow, lily pad, ginkgo. */
+.leaf:nth-child(5n + 1) .oak, .leaf:nth-child(5n + 2) .maple,
+.leaf:nth-child(5n + 3) .willow, .leaf:nth-child(5n + 4) .lily,
+.leaf:nth-child(5n + 5) .ginkgo { display: block; }
 .leaf .oak path { fill: #5f8a2c; stroke: #3b5a1a; }
 .leaf .maple path { fill: #3f8f45; stroke: #255a2a; }
 .leaf .willow path { fill: #74a046; stroke: #46682a; }
 .leaf .lily path { fill: #3a7d3a; stroke: #23502a; }
+.leaf .ginkgo path { fill: #8a9a34; stroke: #56601e; }
 .leaf .leaf-shape .vein { fill: none; stroke: var(--leaf-vein); stroke-width: 2; opacity: 0.7; }
 .leaf .leaf-text { position: relative; text-shadow: 0 2px 2px rgba(0, 0, 0, 0.6); }
 .leaf .ant { position: absolute; width: 3.4rem; height: 1.7rem; right: -4rem; top: 2.6rem; opacity: 0; }
