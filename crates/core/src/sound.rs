@@ -10,6 +10,14 @@ use crate::fixed::{sin64, STEPS, TRIG_ONE};
 
 pub const SAMPLE_RATE: u32 = 22_050;
 
+/// The 16-bit level of a full-scale note at 100% Volume. It was 26,000;
+/// TRIAGE row 75 found every sound too loud, so it is half that (6 dB
+/// quieter) and the default Volume is 50%, not 70%.
+pub const MASTER: i64 = 13_000;
+
+/// The Volume of a new player (TRIAGE row 75). Saved settings keep theirs.
+pub const DEFAULT_VOLUME: u8 = 50;
+
 /// Every sound the game makes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -17,10 +25,11 @@ pub enum Cue {
     /// Something cannot be done: not enough resources, Housing Full, Pop Cap,
     /// a blocked placement. Two short low beeps.
     Warning,
-    /// An upgrade or Evolve finished. A rising chime.
+    /// An upgrade finished. A rising chime.
     Complete,
-    /// Our queen died, or our colony is attacked. A falling alarm.
-    Alert,
+    /// An Evolve finished (TRIAGE row 64): a fuller, lower fanfare than
+    /// Complete, with a held chord at the end.
+    Evolve,
     /// A Windfall or a Hill appeared. A bright arpeggio.
     Event,
     Victory,
@@ -33,7 +42,7 @@ impl Cue {
     pub const ALL: [Cue; 7] = [
         Cue::Warning,
         Cue::Complete,
-        Cue::Alert,
+        Cue::Evolve,
         Cue::Event,
         Cue::Victory,
         Cue::Defeat,
@@ -44,7 +53,7 @@ impl Cue {
         match self {
             Cue::Warning => "warning",
             Cue::Complete => "complete",
-            Cue::Alert => "alert",
+            Cue::Evolve => "evolve",
             Cue::Event => "event",
             Cue::Victory => "victory",
             Cue::Defeat => "defeat",
@@ -60,7 +69,6 @@ impl Cue {
     pub fn cooldown_ms(self) -> i64 {
         match self {
             Cue::Warning => 1_500,
-            Cue::Alert => 6_000,
             Cue::Click => 0,
             _ => 500,
         }
@@ -105,11 +113,14 @@ fn notes(cue: Cue) -> Vec<Note> {
             n(659, 90, 120, 45, Triangle),
             n(784, 180, 260, 45, Triangle),
         ],
-        Cue::Alert => vec![
-            n(880, 0, 160, 50, Square),
-            n(660, 170, 160, 50, Square),
-            n(880, 340, 160, 50, Square),
-            n(660, 510, 220, 50, Square),
+        Cue::Evolve => vec![
+            n(196, 0, 150, 35, Square),
+            n(294, 0, 150, 30, Triangle),
+            n(262, 160, 150, 35, Square),
+            n(392, 160, 150, 30, Triangle),
+            n(392, 320, 520, 40, Triangle),
+            n(196, 320, 520, 30, Sine),
+            n(587, 320, 520, 20, Sine),
         ],
         Cue::Event => vec![
             n(587, 0, 100, 40, Sine),
@@ -202,7 +213,7 @@ pub fn samples(cue: Cue, volume: i32) -> Vec<i16> {
     // Scale the mix (TRIG_ONE is full scale) into 16 bits, with headroom.
     mix.into_iter()
         .map(|v| {
-            let v = v as i64 * 26_000 / TRIG_ONE as i64 * volume as i64 / 100;
+            let v = v as i64 * MASTER / TRIG_ONE as i64 * volume as i64 / 100;
             v.clamp(i16::MIN as i64, i16::MAX as i64) as i16
         })
         .collect()
@@ -263,6 +274,35 @@ mod tests {
                 "{c:?} is silent at 0"
             );
         }
+    }
+
+    #[test]
+    fn sounds_are_quiet_at_the_default_volume() {
+        // TRIAGE row 75: no cue peaks above a fifth of full scale at the
+        // default Volume (the old level reached about half).
+        for c in Cue::ALL {
+            let s = samples(c, DEFAULT_VOLUME as i32);
+            let peak = s.iter().map(|v| (*v as i32).abs()).max().unwrap();
+            assert!(
+                peak <= i16::MAX as i32 / 5,
+                "{c:?} peaks at {peak} at the default Volume"
+            );
+        }
+    }
+
+    #[test]
+    fn an_evolve_sounds_unlike_an_upgrade() {
+        // TRIAGE row 64: its own notes, longer and lower than Complete.
+        let evolve = samples(Cue::Evolve, 100);
+        let complete = samples(Cue::Complete, 100);
+        assert_ne!(evolve, complete);
+        assert!(
+            evolve.len() > complete.len(),
+            "{} vs {}",
+            evolve.len(),
+            complete.len()
+        );
+        assert!(notes(Cue::Evolve)[0].hz < notes(Cue::Complete)[0].hz);
     }
 
     #[test]

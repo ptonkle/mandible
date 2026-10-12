@@ -71,5 +71,7 @@
  "Volume": "How loud the game's sounds are, from 0% to 100%.",
  "Ready Up": "Press again to undo; the host can Start once every joined player is Readied.",
  "Match History": "The last 50 matches played or spectated on this device, newest first.",
- "Mode": "How the match was played: Play vs AI, Online Multiplayer or Spectate."
+ "Mode": "How the match was played: Play vs AI, Online Multiplayer or Spectate.",
+ "End Match": "Stop the match, which only AIs play on, and show the end screen.",
+ "Keep Watching": "Watch the AIs play on, with the whole map shown."
 }

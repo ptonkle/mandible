@@ -880,7 +880,7 @@ fn volume_is_a_slider_in_player_settings_and_the_match_menu() {
         .collect();
     assert_eq!(sliders.len(), 1);
     assert_eq!(sliders[0]["id"], "player.volume");
-    assert_eq!(sliders[0]["value"], 70, "Normal by default");
+    assert_eq!(sliders[0]["value"], 50, "50% by default (TRIAGE row 75)");
     a.act("player.volume", "45", false, false);
     assert_eq!(a.player.volume, 45);
     a.act("go.main_menu", "", false, false);
@@ -896,4 +896,199 @@ fn volume_is_a_slider_in_player_settings_and_the_match_menu() {
     // Settings saved with the old 4-step Volume convert to percent.
     let old = tool_core::keys::PlayerSettings::parse(r#"{"volume": 1}"#).unwrap();
     assert_eq!(old.volume, 35);
+}
+
+// ---- sound, placement and the in-match flow (TRIAGE rows 64, 72, 73, 75–77, 84) ----
+
+fn sounds(a: &mut App) -> Vec<String> {
+    a.ui()
+        .get("sounds")
+        .and_then(|s| s.as_array().cloned())
+        .unwrap_or_default()
+        .iter()
+        .map(|s| s.as_str().unwrap().to_string())
+        .collect()
+}
+
+fn menu_ids(a: &mut App) -> Vec<String> {
+    a.ui()["match"]["menu"]["items"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .filter(|i| i["type"] != "slider")
+        .filter_map(|i| i["id"].as_str().map(|s| s.to_string()))
+        .collect()
+}
+
+#[test]
+fn a_refused_placement_stays_on_the_pointer_with_a_notice_and_no_sound() {
+    use tool_core::app::Mode;
+    use tool_core::rules::StructureKind;
+    let mut a = app();
+    start_match(&mut a);
+    a.resize(1000, 800);
+    run(&mut a, 200);
+    sounds(&mut a);
+    a.act("tab.1", "", false, false);
+    a.act("grid.1", "", false, false); // Brood Cell
+    let (q, qp) = {
+        let g = a.game.as_ref().unwrap();
+        let q = g.world.queens(0).next().unwrap().pos;
+        (q, tool_core::app::to_pixels(&g.view, q))
+    };
+    // On the queen itself: refused before anything is sent.
+    a.mouse("mousemove", 0, qp.0, qp.1, false);
+    a.mouse("mousedown", 0, qp.0, qp.1, false);
+    {
+        let g = a.game.as_ref().unwrap();
+        assert_eq!(
+            g.mode,
+            Mode::Place(StructureKind::BroodCell),
+            "the blueprint stays on the pointer"
+        );
+        assert!(g.pending.is_empty(), "no command is sent");
+    }
+    assert!(sounds(&mut a).is_empty(), "a refused placement is silent");
+    assert!(notices(&mut a).contains(&"Placement Blocked".to_string()));
+    // Then a free spot: placed, and the pointer is free again.
+    let spot = {
+        let g = a.game.as_ref().unwrap();
+        let (x, y) = tool_core::ai::find_spot(&g.world, 0, StructureKind::BroodCell, q, 6).unwrap();
+        tool_core::app::to_pixels(&g.view, tool_core::fixed::Pos::of_cell(x, y))
+    };
+    a.mouse("mousemove", 0, spot.0, spot.1, false);
+    a.mouse("mousedown", 0, spot.0, spot.1, false);
+    assert_eq!(a.game.as_ref().unwrap().mode, Mode::Idle);
+    run(&mut a, 200);
+    assert!(a
+        .game
+        .as_ref()
+        .unwrap()
+        .world
+        .structures
+        .iter()
+        .any(|s| !s.complete));
+    // A placement the simulation refuses (the map changed after it was
+    // sent) is silent too.
+    sounds(&mut a);
+    {
+        let g = a.game.as_mut().unwrap();
+        let (x, y) = q.cell();
+        g.issue(tool_core::world::Command::Place {
+            kind: StructureKind::BroodCell,
+            x,
+            y,
+            x2: x,
+            y2: y,
+        });
+    }
+    run(&mut a, 200);
+    assert!(sounds(&mut a).is_empty());
+}
+
+#[test]
+fn an_evolve_has_its_own_sound_and_a_lost_queen_none() {
+    let mut a = app();
+    start_match(&mut a);
+    run(&mut a, 200);
+    sounds(&mut a);
+    let hear = |a: &mut App, key: &str| -> Vec<String> {
+        {
+            let w = &mut a.game.as_mut().unwrap().world;
+            let tick = w.tick + 1;
+            w.announcements.push(tool_core::world::Announcement {
+                tick,
+                key: key.into(),
+                colony: Some(0),
+                at: None,
+            });
+        }
+        run(a, 100);
+        sounds(a)
+    };
+    assert_eq!(hear(&mut a, "notice.evolved.2"), ["evolve"]);
+    assert_eq!(hear(&mut a, "notice.upgraded.armor"), ["complete"]);
+    assert!(hear(&mut a, "notice.queen_lost").is_empty());
+}
+
+#[test]
+fn the_last_human_out_may_end_the_match_or_keep_watching() {
+    let mut a = app();
+    a.act("go.play_vs_ai", "", false, false);
+    a.act("pva.format", "free_for_all", false, false);
+    a.act("pva.start", "", false, false);
+    run(&mut a, 200);
+    a.key("Escape", true, false, false);
+    a.act("menu.concede", "", false, false);
+    a.act("menu.concede_yes", "", false, false);
+    run(&mut a, 300);
+    let ui = a.ui();
+    assert!(ui["match"]["end"].is_null(), "the AIs play on");
+    assert_eq!(ui["match"]["menu"]["heading"], "Defeat");
+    assert_eq!(menu_ids(&mut a), ["menu.end_match", "menu.keep_watching"]);
+    // Keep Watching: the match runs on, with the whole map shown.
+    a.act("menu.keep_watching", "", false, false);
+    assert!(a.ui()["match"]["menu"].is_null());
+    let t = a.game.as_ref().unwrap().world.tick;
+    run(&mut a, 500);
+    assert!(a.game.as_ref().unwrap().world.tick > t);
+    assert!(a.fog().iter().all(|b| *b == 0), "the whole map is shown");
+    // The Menu still offers End Match (row 84), then the end screen.
+    a.key("Escape", true, false, false);
+    assert_eq!(
+        menu_ids(&mut a),
+        ["menu.resume", "menu.end_match", "end.main_menu"]
+    );
+    a.act("menu.end_match", "", false, false);
+    let ui = a.ui();
+    assert_eq!(ui["match"]["end"]["title"], "Defeat");
+    let t = a.game.as_ref().unwrap().world.tick;
+    run(&mut a, 500);
+    assert_eq!(a.game.as_ref().unwrap().world.tick, t, "the match stopped");
+}
+
+#[test]
+fn a_spectator_can_end_the_match_and_a_player_cannot_while_playing() {
+    let mut a = app();
+    start_match(&mut a);
+    a.key("Escape", true, false, false);
+    assert_eq!(menu_ids(&mut a), ["menu.resume", "menu.concede"]);
+    a.act("menu.end_match", "", false, false);
+    assert!(!a.game.as_ref().unwrap().over(), "not while a human plays");
+    a.act("go.main_menu", "", false, false);
+    a.act("go.play_vs_ai", "", false, false);
+    a.act("ai.0", "imago", false, false);
+    a.act("pva.start", "", false, false);
+    a.key("Escape", true, false, false);
+    assert_eq!(
+        menu_ids(&mut a),
+        ["menu.resume", "menu.end_match", "end.main_menu"]
+    );
+    a.act("menu.end_match", "", false, false);
+    assert_eq!(a.ui()["match"]["end"]["title"], "Match Ended");
+    // End Match is recorded in Match History, once.
+    a.ui();
+    let m = &a.match_history.stored.matches;
+    assert_eq!(m.len(), 1, "End Match is recorded");
+    assert_eq!(m[0].result, tool_core::history::MatchResult::Spectate);
+    assert_eq!(m[0].winner, None);
+}
+
+#[test]
+fn the_whole_map_is_shown_when_the_match_ends() {
+    // TRIAGE row 77.
+    let mut a = app();
+    start_match(&mut a);
+    run(&mut a, 200);
+    assert!(a.fog().iter().any(|b| *b != 0), "Fog of War while playing");
+    // The AI gives up: we win, still playing, and see the whole map.
+    a.game
+        .as_mut()
+        .unwrap()
+        .world
+        .apply(1, &tool_core::world::Command::Concede);
+    run(&mut a, 300);
+    assert_eq!(a.ui()["match"]["end"]["title"], "Victory");
+    assert!(a.fog().iter().all(|b| *b == 0), "no Fog of War at the end");
 }

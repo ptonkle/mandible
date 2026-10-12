@@ -103,7 +103,7 @@ impl Default for PlayerSettings {
             keys: Vec::new(),
             edge_pan: true,
             edge_pan_speed: 2,
-            volume: 70,
+            volume: crate::sound::DEFAULT_VOLUME,
             name: String::new(),
         }
     }

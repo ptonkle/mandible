@@ -255,6 +255,7 @@ Rejected names. Do not reuse them without passing the naming test.
 | Auto-Scout | ◆ | A toggle on the Colony tab. While on, one combat ant, chosen by the simulation, explores by itself: unexplored chambers nearest first, then chambers out of sight. Shown Active while on. | auto-explore, scout mode |
 | Gather Focus | ◆ | Which resource Harvester Ants favour: Balanced (Food 3 : Nectar 1 : Leaves 2; was 2 : 1 : 1 until TRIAGE row 52), or Food, Nectar or Leaves (3 : 1 : 1 toward it). | priority, eco setting, worker split |
 | Balanced | ◆ | The default Gather Focus. | even, default |
+| Build Area | ◆ | Where a structure other than a queen or a wall may be placed: its centre within 16 cells of one of the colony's queens (a queen blueprint counts). While placing, a ring round each queen shows it. Code: `BUILD_AREA`. | build radius, build zone |
 | Placement Blocked | ◆ | Notice: the blueprint cannot go there (rock, another structure, a node, not explored, or too far from a queen). | invalid placement, can't build here |
 | Not Enough | ◆ | Notice prefix for a missing resource: "Not Enough Nectar". | insufficient, need more |
 | Requires | ◆ | Label for what an action still needs: a tier, a hatchery or a queen. | needs, prerequisite |
@@ -269,7 +270,8 @@ Rejected names. Do not reuse them without passing the naming test.
 | Grid Tab | ◆ | One page of the action grid, if there are more actions than buttons (for example Ants, Queens, Upgrades). *Still open.* | page, menu, category |
 | Ants, Build, Waypoints, Upgrades, Colony | ◆ | The five grid tabs, on keys 1–5. | units, buildings, research, economy |
 | Pan, Edge Pan | ◆ | Moving the view: Pan with the arrow keys or by dragging; Edge Pan moves it when the pointer touches the screen edge. | scroll, camera move |
-| Volume | ◆ | How loud the game's sounds are: a slider from 0% to 100% (steps of 5), in Player Settings and in the in-match Menu. | sound level, loudness |
+| Volume | ◆ | How loud the game's sounds are: a slider from 0% to 100% (steps of 5), in Player Settings and in the in-match Menu. A new player starts at 50%. | sound level, loudness |
+| Sounds | ◆ | The game's sounds (code: `Cue`), never on screen: Warning (a refusal such as Not Enough or Pop Cap; not a refused placement), Complete (an upgrade finished), Evolve (an Evolve finished), Event (Windfall, Hill), Victory, Defeat, Click. Queen Lost makes no sound. | jingle, sfx |
 | Benchmark | ★ | The Player Settings button that runs the performance-test scenario live, with its budget. | perf test, stress test |
 | Frames per second, Tick average, Tick worst, Draw average, Budget, Measuring, Within budget, Over budget | ◆ | The Benchmark panel's labels and states: drawing rate; simulation time per tick (average and worst); drawing time per frame; the budget (tick under 8 ms, 60 frames per second); and whether the run is inside it. | FPS, lag, performance score |
 | Hotkey | ★ | The key that triggers an action button. It follows the button's position on the keyboard. | shortcut, keybind (that is the setting), key |
@@ -288,7 +290,7 @@ Rejected names. Do not reuse them without passing the naming test.
 
 | Term | Origin | Meaning | Never say |
 | --- | --- | --- | --- |
-| Fog of War | ★ | Everything a colony cannot currently see. | shroud, darkness, fog (alone, in UI text) |
+| Fog of War | ★ | Everything a colony cannot currently see. Once a match is over (a team won, or End Match), and while only AIs play on after the last human is defeated, the whole map is shown. | shroud, darkness, fog (alone, in UI text) |
 | Unexplored | ◆ | Map never seen. Drawn black. | hidden, unknown, black |
 | Explored | ◆ | Map seen before but not visible now. Shows rock, dirt and the last known state. | fogged, remembered |
 | Visible | ◆ | Map currently in some ant's or queen's line of sight. | revealed, lit, seen |
@@ -310,8 +312,11 @@ Rejected names. Do not reuse them without passing the naming test.
 | Term | Origin | Meaning | Never say |
 | --- | --- | --- | --- |
 | Main Menu | ★ | The first screen. | title screen, home, start menu |
-| Menu | ◆ | The in-match menu (Esc): Resume, Concede. | pause menu, options |
+| Menu | ◆ | The in-match menu (Esc): Resume, Concede. When this player is out (defeated, or spectating): Resume, End Match (only while no human plays on), Main Menu. | pause menu, options |
 | Resume | ◆ | Close the Menu and carry on. | continue, unpause |
+| End Match | ◆ | Stops a match in which only AIs play on (the last human conceded or was defeated, or the match is spectated) and shows the end screen, titled Defeat (or Match Ended for a spectator). Offered with Keep Watching when the last human is defeated, and in the Menu after that. Online, it leaves the room. | abort, quit, stop game |
+| Keep Watching | ◆ | After the last human is defeated: watch the AIs play on, with the whole map shown. End Match stays in the Menu. | observe |
+| Match Ended | ◆ | The end screen's title when a spectator chose End Match: no team won. | |
 | Map Size, Chamber Size | ★ | Match Settings for the size of the map and of its chambers: Small, Normal or Large. | map scale, room size |
 | Map Type | ★ | The Match Setting for the map's shape: Tunnels, Open Ground or Maze. Every type is rotation-symmetric, keeps every home reachable without digging, and keeps the narrowest gap at least the Tunnel Width. | map style, layout, terrain type |
 | Tunnels, Open Ground, Maze | ★ | The three Map Types. Tunnels: chambers joined by tunnels. Open Ground: open ground with blobs of rock. Maze: open ground crossed by thin, connected rock walls with gaps; some wall stretches are dirt. "Open Ground" is never shortened to "Open", which is a lobby seat state. | caves, arena, labyrinth, open map |

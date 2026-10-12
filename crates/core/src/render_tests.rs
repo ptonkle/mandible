@@ -1024,3 +1024,90 @@ fn each_hit_kind_has_its_own_look() {
     };
     assert!(plus_top(2) < plus_top(0), "the plus rises");
 }
+
+#[test]
+fn placing_rings_our_queens_with_the_build_area_of_the_placement_rule() {
+    // TRIAGE row 73. The rule first: a Brood Cell is refused for want of
+    // a queen exactly where its centre lies beyond BUILD_AREA.
+    let mut w = world(Format::OneVOne);
+    let n = (w.map.w * w.map.h) as usize;
+    w.explored[0].set_all(n);
+    let q = w.structures[queen_of(&w, 0)].pos;
+    let (qx, qy) = q.cell();
+    let (mut inside, mut outside) = (0, 0);
+    for y in qy - 20..=qy + 20 {
+        for x in qx - 20..=qx + 20 {
+            let far = Pos::of_cell(x, y).dist(q) > BUILD_AREA;
+            match w.check_place(0, StructureKind::BroodCell, x, y, x, y) {
+                Ok(()) => {
+                    assert!(!far, "{x},{y} is allowed outside the ring");
+                    inside += 1;
+                }
+                Err(crate::world::Refusal::NeedsQueen) => {
+                    assert!(far, "{x},{y} is refused inside the ring");
+                    outside += 1;
+                }
+                Err(_) => {}
+            }
+        }
+    }
+    assert!(
+        inside > 0 && outside > 0,
+        "{inside} inside, {outside} outside"
+    );
+
+    // The ring: one round our queen (not the enemy's) at that radius,
+    // while placing a structure that needs a queen; none for a wall or a
+    // queen.
+    let cam = camera_on(q, 12);
+    let rings = |kind: StructureKind| -> Vec<Vec<i32>> {
+        let overlay = Overlay {
+            terrain_scale: 0,
+            place: Some(Placing {
+                colony: 0,
+                kind,
+                x: qx + 4,
+                y: qy,
+                x2: qx + 4,
+                y2: qy,
+                valid: true,
+            }),
+            hover_waypoint: None,
+        };
+        decode(&frame(&w, Some(0), &cam, &overlay, 0))
+            .into_iter()
+            .filter(|(c, a)| *c == op::OUTLINE && a[0] == C_BUILD_AREA)
+            .map(|(_, a)| a)
+            .collect()
+    };
+    let found = rings(StructureKind::BroodCell);
+    assert_eq!(found.len(), 1, "one ring, round our one queen");
+    let (sx, sy) = cam.screen(q);
+    let r = cam.length(BUILD_AREA) as i64;
+    for p in found[0][3..].chunks(2) {
+        let (dx, dy) = ((p[0] - sx) as i64, (p[1] - sy) as i64);
+        let d2 = dx * dx + dy * dy;
+        assert!(
+            (d2 - r * r).abs() <= r * r / 50,
+            "a ring point {dx},{dy} is off the radius {r}"
+        );
+    }
+    assert!(rings(StructureKind::Wall).is_empty());
+    assert!(rings(StructureKind::Queen).is_empty());
+}
+
+#[test]
+fn the_tab_icon_is_an_svg_data_url_that_loads_nothing() {
+    // TRIAGE row 65. '#' would end the URL early, and '<' '>' are encoded
+    // as in any URL; the SVG refers to nothing outside itself.
+    let url = tab_icon();
+    assert!(url.starts_with("data:image/svg+xml,%3Csvg "), "{url}");
+    assert!(url.ends_with("%3C/svg%3E"), "{url}");
+    assert!(
+        !url.contains('#') && !url.contains('<') && !url.contains('>'),
+        "{url}"
+    );
+    assert!(!url.contains("href") && !url.contains("url("), "{url}");
+    let assets: serde_json::Value = serde_json::from_str(&assets_json()).expect("JSON");
+    assert_eq!(assets["tab_icon"], url.as_str());
+}

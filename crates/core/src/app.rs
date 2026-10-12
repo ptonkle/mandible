@@ -28,7 +28,8 @@ use crate::settings::{
 };
 use crate::sound::Cue;
 use crate::world::{
-    Amount, Command, Focus, Refusal, Sample, Work, World, HILL_REWARD, SAMPLE_TICKS,
+    Amount, Announcement, Command, Controller, Focus, Refusal, Sample, Work, World, HILL_REWARD,
+    SAMPLE_TICKS,
 };
 
 /// Peers with different builds refuse each other; raise on every release
@@ -190,6 +191,15 @@ pub struct Game {
     pub end_graph: usize,
     /// Match History: whether this match is recorded, and whether You conceded.
     pub history_mark: crate::history::Mark,
+    /// Notices made here, not by the simulation: a placement refused
+    /// before its command was sent (TRIAGE row 72). Shown like the
+    /// world's notices, with no sound.
+    pub local_notices: Vec<Announcement>,
+    /// End Match was chosen while only AIs play on (TRIAGE rows 76, 84):
+    /// the simulation stops and the end screen shows.
+    pub stopped: bool,
+    /// Keep Watching was chosen after the last human was defeated.
+    pub keep_watching: bool,
 }
 
 impl Game {
@@ -224,6 +234,9 @@ impl Game {
             time_scale: 1,
             end_graph: 0,
             history_mark: Default::default(),
+            local_notices: Vec::new(),
+            stopped: false,
+            keep_watching: false,
         }
     }
 
@@ -241,6 +254,89 @@ impl Game {
             self.vision
         } else {
             Some(self.me)
+        }
+    }
+
+    /// The match is over for this client: a team won, or End Match was
+    /// chosen.
+    pub fn over(&self) -> bool {
+        self.world.winner.is_some() || self.stopped
+    }
+
+    /// No human plays on: every Human colony is defeated (a human who left
+    /// an online match is an AI by then), or the match is spectated. Only
+    /// then may this client end the match on its own (TRIAGE rows 76, 84).
+    pub fn only_ais_left(&self) -> bool {
+        self.spectate
+            || !self
+                .world
+                .colonies
+                .iter()
+                .any(|c| c.controller == Controller::Human && !c.defeated)
+    }
+
+    /// The last human was just defeated (conceded or lost) while AIs play
+    /// on, and the choice End Match or Keep Watching is not made yet.
+    pub fn offer_end(&self) -> bool {
+        !self.spectate && !self.over() && !self.keep_watching && self.only_ais_left()
+    }
+
+    /// Whose Fog of War the map, the fog image and the minimap use. The
+    /// whole map once the match is over (TRIAGE row 77) or when only AIs
+    /// are left and this player keeps watching.
+    pub fn sight(&self) -> Option<u8> {
+        if self.over() || (!self.spectate && self.only_ais_left()) {
+            None
+        } else {
+            self.follow()
+        }
+    }
+
+    /// Why placing a structure here would be refused now, worked out
+    /// before the command is sent so a refused blueprint stays on the
+    /// pointer (TRIAGE row 72). The same rule and cost as the simulation.
+    pub fn place_refusal(
+        &self,
+        kind: StructureKind,
+        x: i32,
+        y: i32,
+        x2: i32,
+        y2: i32,
+    ) -> Option<Refusal> {
+        let me = self.me;
+        if self.world.colonies[me as usize].defeated {
+            return Some(Refusal::Defeated);
+        }
+        if let Err(r) = self.world.check_place(me, kind, x, y, x2, y2) {
+            return Some(r);
+        }
+        let cost = place_cost(&self.world, me, kind, x, y, x2, y2);
+        let stock = self.world.colonies[me as usize].stock;
+        Resource::ALL
+            .into_iter()
+            .find(|r| stock[r.index()] < cost[r.index()])
+            .map(Refusal::NotEnough)
+    }
+
+    /// Sends a placement, or shows why it is refused; true when sent.
+    fn try_place(&mut self, kind: StructureKind, x: i32, y: i32, x2: i32, y2: i32) -> bool {
+        match self.place_refusal(kind, x, y, x2, y2) {
+            Some(r) => {
+                self.local_notices.push(Announcement {
+                    tick: self.world.tick,
+                    key: r.key(),
+                    colony: Some(self.me),
+                    at: None,
+                });
+                if self.local_notices.len() > 4 {
+                    self.local_notices.remove(0);
+                }
+                false
+            }
+            None => {
+                self.issue(Command::Place { kind, x, y, x2, y2 });
+                true
+            }
         }
     }
 
@@ -1127,12 +1223,19 @@ impl App {
             controls.push(json!({"id": "time.scale", "text": format!("{}: {}", self.t("time.scale"), self.t(&format!("time.scale.{}", g.time_scale))), "term": self.t("time.scale"), "active": false}));
         }
 
-        let notices: Vec<Value> = w
+        // The world's notices and this client's own (a refused placement),
+        // newest first.
+        let mut shown: Vec<&Announcement> = w
             .announcements
             .iter()
-            .rev()
+            .chain(&g.local_notices)
             .filter(|a| a.colony.is_none() || a.colony == follow)
             .filter(|a| w.tick - a.tick < 6 * TICKS_PER_SECOND)
+            .collect();
+        shown.reverse();
+        shown.sort_by_key(|a| std::cmp::Reverse(a.tick));
+        let notices: Vec<Value> = shown
+            .into_iter()
             .take(4)
             .map(|a| json!({"text": self.announcement_text(w, &a.key)}))
             .collect();
@@ -1151,20 +1254,32 @@ impl App {
                 Mode::Waypoint(_) => "waypoint",
             },
         });
-        if let Some(team) = w.winner {
-            v["end"] = self.end_view(g, team);
-            if self.can_rematch(g) {
+        if g.over() {
+            v["end"] = self.end_view(g, w.winner);
+            // An online match this client ended alone has left the room.
+            if self.can_rematch(g) && !(g.stopped && g.lockstep.is_some()) {
                 v["end"]["items"] = json!([
                     self.button("end.rematch", "end.rematch"),
                     v["end"]["button"].clone()
                 ]);
             }
+        } else if g.offer_end() {
+            // TRIAGE row 76: the last human is out and AIs play on.
+            v["menu"] = json!({"heading": self.t("end.defeat"), "items": [self.button("menu.end_match", "menu.end_match"), self.button("menu.keep_watching", "menu.keep_watching")]});
         } else if g.menu_open {
+            let out = g.spectate || g.world.colonies[g.me as usize].defeated;
             v["menu"] = if g.confirm_concede {
                 json!({"heading": self.t("menu.concede_confirm"), "items": [self.button("menu.concede_yes", "menu.concede"), self.button("menu.resume", "menu.resume")]})
-            } else if g.spectate {
-                // A spectator has nothing to concede: Resume or leave.
-                json!({"items": [self.button("menu.resume", "menu.resume"), self.button("end.main_menu", "menu.main_menu")]})
+            } else if out {
+                // Nothing to concede (a spectator, or a defeated colony):
+                // Resume, End Match while only AIs play on (row 84), or
+                // leave.
+                let mut items = vec![self.button("menu.resume", "menu.resume")];
+                if g.only_ais_left() {
+                    items.push(self.button("menu.end_match", "menu.end_match"));
+                }
+                items.push(self.button("end.main_menu", "menu.main_menu"));
+                json!({ "items": items })
             } else {
                 json!({"items": [self.button("menu.resume", "menu.resume"), self.button("menu.concede", "menu.concede")]})
             };
@@ -1184,18 +1299,25 @@ impl App {
     /// pick what it shows), and a label-value summary for every colony.
     /// The core lays out the graph: the page only copies the SVG path
     /// strings, label positions and colors into the page.
-    fn end_view(&self, g: &Game, team: u8) -> Value {
+    /// `winner` is `None` when End Match stopped a match AIs were still
+    /// playing (TRIAGE rows 76, 84).
+    fn end_view(&self, g: &Game, winner: Option<u8>) -> Value {
         let w = &g.world;
         let end = g.ended_at.unwrap_or(w.tick);
-        let title = if g.spectate {
-            format!("{}: {}", self.t("end.victory"), self.team_name(w, team))
-        } else {
-            let mine = w.colonies[g.me as usize].team;
-            self.t(if team == mine {
-                "end.victory"
-            } else {
-                "end.defeat"
-            })
+        let title = match winner {
+            Some(team) if g.spectate => {
+                format!("{}: {}", self.t("end.victory"), self.team_name(w, team))
+            }
+            Some(team) => {
+                let mine = w.colonies[g.me as usize].team;
+                self.t(if team == mine {
+                    "end.victory"
+                } else {
+                    "end.defeat"
+                })
+            }
+            None if g.spectate => self.t("end.match_ended"),
+            None => self.t("end.defeat"),
         };
         let columns: Vec<Value> = (0..w.colonies.len())
             .map(|i| {
@@ -2061,6 +2183,27 @@ impl App {
                     g.confirm_concede = true;
                 }
             }
+            "menu.end_match" => {
+                let ended = match &mut self.game {
+                    Some(g) if !g.over() && g.only_ais_left() => {
+                        g.stopped = true;
+                        g.menu_open = false;
+                        g.ended_at.get_or_insert(g.world.tick);
+                        g.lockstep.is_some()
+                    }
+                    _ => false,
+                };
+                // Online: the room is told this client left, so no peer
+                // waits for it.
+                if ended {
+                    self.leave_online();
+                }
+            }
+            "menu.keep_watching" => {
+                if let Some(g) = &mut self.game {
+                    g.keep_watching = true;
+                }
+            }
             "menu.concede_yes" => {
                 if let Some(g) = &mut self.game {
                     g.issue(Command::Concede);
@@ -2335,21 +2478,15 @@ impl App {
             return;
         };
         g.mouse = (x, y);
-        if g.menu_open || g.world.winner.is_some() {
+        if g.menu_open || g.over() || g.offer_end() {
             return;
         }
         let (cx, cy) = g.mouse_cell();
         match (kind, button) {
             (0, 0) => match g.mode {
                 Mode::Place(kind) => {
-                    g.issue(Command::Place {
-                        kind,
-                        x: cx,
-                        y: cy,
-                        x2: cx,
-                        y2: cy,
-                    });
-                    if !shift {
+                    // A refused blueprint stays on the pointer (row 72).
+                    if g.try_place(kind, cx, cy, cx, cy) && !shift {
                         g.mode = Mode::Idle;
                     }
                 }
@@ -2372,14 +2509,12 @@ impl App {
             (0, 1) => g.drag = Some((x, y, 0, 0)),
             (1, 0) => {
                 if let Mode::Wall(Some((sx, sy))) = g.mode {
-                    g.issue(Command::Place {
-                        kind: StructureKind::Wall,
-                        x: sx,
-                        y: sy,
-                        x2: cx,
-                        y2: cy,
-                    });
-                    g.mode = if shift { Mode::Wall(None) } else { Mode::Idle };
+                    let placed = g.try_place(StructureKind::Wall, sx, sy, cx, cy);
+                    g.mode = if shift || !placed {
+                        Mode::Wall(None)
+                    } else {
+                        Mode::Idle
+                    };
                 }
                 g.drag = None;
             }
@@ -2489,6 +2624,9 @@ impl App {
         g.view.pan(axis(keys_x, edge_x), axis(keys_y, edge_y));
         g.view.clamp(g.world.map.w, g.world.map.h);
 
+        if g.stopped {
+            return;
+        }
         if g.world.winner.is_some() {
             g.ended_at.get_or_insert(g.world.tick);
             if g.lockstep.is_none() {
@@ -2599,15 +2737,19 @@ impl App {
                 continue;
             }
             let k = a.key.as_str();
-            let c = if k.starts_with("notice.upgraded") || k.starts_with("notice.evolved") {
+            let c = if k.starts_with("notice.upgraded") {
                 Some(Cue::Complete)
-            } else if k == "notice.queen_lost" {
-                Some(Cue::Alert)
+            } else if k.starts_with("notice.evolved") {
+                Some(Cue::Evolve)
+            } else if k == "notice.queen_lost" || k == "notice.bad_place" {
+                // TRIAGE row 75: Queen Lost is silent. Row 72: so is a
+                // refused placement (the blueprint stays on the pointer).
+                None
             } else if k.starts_with("announce.windfall") || k == "announce.hill" {
                 Some(Cue::Event)
             } else if k.starts_with("notice.") {
                 // Every other notice is a refusal: not enough, needs a tier,
-                // Pop Cap, a blocked placement…
+                // Pop Cap…
                 Some(Cue::Warning)
             } else {
                 None
@@ -2644,7 +2786,7 @@ impl App {
         let Some(g) = &self.game else {
             return Vec::new();
         };
-        let viewer = g.follow();
+        let viewer = g.sight();
         let (cx, cy) = g.mouse_cell();
         let place = match g.mode {
             Mode::Place(kind) => Some((kind, cx, cy, cx, cy)),
@@ -2738,7 +2880,7 @@ impl App {
     pub fn fog_stamp(&self) -> i32 {
         self.game
             .as_ref()
-            .map(|g| g.world.tick * 8 + g.follow().map_or(0, |c| c as i32 + 1))
+            .map(|g| g.world.tick * 8 + g.sight().map_or(0, |c| c as i32 + 1))
             .unwrap_or(-1)
     }
 
@@ -2751,7 +2893,7 @@ impl App {
 
     pub fn fog(&self) -> Vec<u8> {
         match &self.game {
-            Some(g) => render::fog_image(&g.world, g.follow()),
+            Some(g) => render::fog_image(&g.world, g.sight()),
             None => Vec::new(),
         }
     }
@@ -2759,7 +2901,7 @@ impl App {
     /// The minimap, `size` x `size` RGBA.
     pub fn minimap(&self, size: i32) -> Vec<u8> {
         match &self.game {
-            Some(g) => render::minimap(&g.world, g.follow(), &g.view, size),
+            Some(g) => render::minimap(&g.world, g.sight(), &g.view, size),
             None => Vec::new(),
         }
     }

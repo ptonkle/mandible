@@ -151,12 +151,12 @@ impl MatchHistory {
 
 impl App {
     /// Called from `ui()` every frame: records a match once it has a
-    /// winner, and hands the page the history to store when it changed.
+    /// winner or End Match stopped it, and hands the page the history to store when it changed.
     pub fn history_frame(&mut self, v: &mut Value) {
         let due = self
             .game
             .as_ref()
-            .is_some_and(|g| g.world.winner.is_some() && !g.history_mark.recorded);
+            .is_some_and(|g| g.over() && !g.history_mark.recorded);
         if due {
             self.record_match();
         }
@@ -329,7 +329,7 @@ impl App {
                     self.t("end.victory"),
                     self.history_team_name(m, t)
                 ),
-                None => self.t("stat.none"),
+                None => self.t("end.match_ended"),
             },
         }
     }
