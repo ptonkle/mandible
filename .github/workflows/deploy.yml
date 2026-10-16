@@ -1,0 +1,75 @@
+name: Check, then deploy to Pages
+
+# The check is the same file a person runs locally (Builder R8). A push to
+# main deploys only after it passes: pushing main is the deploy.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --component clippy,rustfmt
+          rustup target add wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+
+      # The version must match the `=0.2.127` pin in crates/shim/Cargo.toml
+      # (scripts/build.sh refuses any other CLI version).
+      - name: wasm-bindgen CLI (pinned) and wasm-tools
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen@0.2.127,wasm-tools
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      # Chromium only in CI; the three-engine check is run locally before a
+      # push. The Playwright version matches scripts/setup.sh.
+      - name: Playwright and Chromium
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install --quiet "playwright==1.63.0"
+          .venv/bin/python -m playwright install --with-deps chromium
+
+      - name: ./scripts/check.sh (Chromium)
+        run: BUILDER_ENGINES=chromium ./scripts/check.sh
+
+      # As scripts/pages.sh does: the transport test page is for checks only.
+      - name: Remove check-only files from dist
+        if: github.event_name != 'pull_request'
+        run: rm -f dist/nettest.html dist/nettest.js
+
+      - uses: actions/upload-pages-artifact@v3
+        if: github.event_name != 'pull_request'
+        with:
+          path: dist
+
+  deploy:
+    if: github.event_name != 'pull_request'
+    needs: check
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

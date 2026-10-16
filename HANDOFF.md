@@ -33,11 +33,9 @@ A fresh session starts from this file, not from memory.
 - Then run `check.sh`, `check-online.sh` and the ladder for all three map types, and record the results here.
 - SECOND-ORDER rows were renumbered in merge order, so agents' notes in TRIAGE may cite their own pre-merge row numbers.
 
-**Deploy (only when the person says so; each deploy needs their go-ahead):**
-1. Run `./scripts/pages.sh`.
-2. In `~/slop/ptonkle.github.io`, scan for personal names.
-3. Commit as `ptonk <65458712+ptonkle@users.noreply.github.com>` and push.
-4. Run `BUILDER_ORIGIN=https://ptonkle.github.io/mandible .venv/bin/python tests/browser/check.py`.
+**Deploy (only when the person says so; each deploy needs their go-ahead):** push `main` to `ptonkle/mandible`. The Actions workflow (`.github/workflows/deploy.yml`) runs `BUILDER_ENGINES=chromium ./scripts/check.sh`, drops the check-only `nettest.html`/`nettest.js` from `dist/` and deploys `dist/` to GitHub Pages. Watch the run (`gh run watch`).
+1. Before pushing, run the full three-engine `./scripts/check.sh` locally (CI runs Chromium only).
+2. After the run succeeds, run `BUILDER_ORIGIN=https://ptonkle.github.io/mandible .venv/bin/python tests/browser/check.py`.
 
 The battle pictures came from a throwaway headless scan of all-AI Imago matches (not kept). Each was captured with Fog of War Off, Map Size Normal, the format's default teams, then paused and cropped. Picture: format, seed, biome / Map Type, clock time.
 - 01: FFA, 7, Forest Floor / Open Ground, 7:14
@@ -100,9 +98,9 @@ The details are in `SECOND-ORDER.md` rows 37–40.
 ## Deployed (stage 8, 2026-10-11, by the person's decision)
 
 - **Home page:** https://ptonkle.github.io/, with the game at https://ptonkle.github.io/mandible/.
-- **Repository:** `ptonkle/ptonkle.github.io`, public, served by GitHub Pages from `main`. Its local copy is `~/slop/ptonkle.github.io`. Only the built game is published; the source stays local.
-- **Updating:** `./scripts/pages.sh` rebuilds the game and copies it into that folder. Then commit and push there. The site's commits use author `ptonk <65458712+ptonkle@users.noreply.github.com>`.
-- **Privacy:** the published files hold no personal names. `build.sh` maps the home folder to `~` in paths embedded in the wasm.
+- **Repository:** the source is public at `ptonkle/mandible` (MIT, see `LICENSE` and `LICENSES.md`), and that repository serves the game through GitHub Pages. The home page stays in `ptonkle/ptonkle.github.io` (local copy `~/slop/ptonkle.github.io`).
+- **Updating:** push `main`; the Actions run checks and deploys (see "Deploy" above). `./scripts/pages.sh` was the old way (copying the build into the site repo) and is no longer the deploy path.
+- **Privacy:** the repository and the published files hold no personal name. `build.sh` maps the home folder to `~` in paths embedded in the wasm. Commits use author `ptonk <65458712+ptonkle@users.noreply.github.com>`.
 - **Check:** `BUILDER_ORIGIN=https://ptonkle.github.io/mandible .venv/bin/python tests/browser/check.py` passed in chromium, firefox and webkit, against the live site.
 - **Redeployed 2026-10-11** from commit `3dd622e` (site commit `46d17d5`): lobby, Ready Up, Rematch, sound, volume slider, maps and balance. Name scan clean; live browser check passed in all three engines.
 - **Redeployed again 2026-10-11** from commit `ac7cb2a` (site commit `34766d4`): batch 3 (TRIAGE rows 61–89) and the home page battle pictures (12 in `img/mandible/`, one at random). Live browser check passed in all three engines.
