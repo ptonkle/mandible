@@ -99,7 +99,7 @@ The details are in `SECOND-ORDER.md` rows 37–40.
 
 - **Home page:** https://ptonkle.github.io/, with the game at https://ptonkle.github.io/mandible/.
 - **Repository:** the source is public at `ptonkle/mandible` (MIT, see `LICENSE` and `LICENSES.md`), and that repository serves the game through GitHub Pages. The home page stays in `ptonkle/ptonkle.github.io` (local copy `~/slop/ptonkle.github.io`).
-- **Updating:** push `main`; the Actions run checks and deploys (see "Deploy" above). `./scripts/pages.sh` was the old way (copying the build into the site repo) and is no longer the deploy path.
+- **Updating:** run `./scripts/check.sh` locally, then push `main`; the Actions build and deploy (see "Deploy" above). `./scripts/pages.sh` was the old way (copying the build into the site repo) and is no longer the deploy path.
 - **Privacy:** the repository and the published files hold no personal name. `build.sh` maps the home folder to `~` in paths embedded in the wasm. Commits use author `ptonk <65458712+ptonkle@users.noreply.github.com>`.
 - **Check:** `BUILDER_ORIGIN=https://ptonkle.github.io/mandible .venv/bin/python tests/browser/check.py` passed in chromium, firefox and webkit, against the live site.
 - **Redeployed 2026-10-11** from commit `3dd622e` (site commit `46d17d5`): lobby, Ready Up, Rematch, sound, volume slider, maps and balance. Name scan clean; live browser check passed in all three engines.
